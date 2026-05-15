@@ -1,0 +1,1621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DigestIQ Intelligence Engine</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.0/css/all.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+*{font-family:'Inter',sans-serif;box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --teal:#0ABFBC;--indigo:#4F46E5;--violet:#7C3AED;
+  --emerald:#059669;--amber:#D97706;--dark:#050A14;
+}
+body{background:var(--dark);color:#E2E8F0;overflow-x:hidden;}
+canvas{display:block;}
+
+.glass{background:rgba(15,23,42,0.75);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.07);}
+.glass-light{background:rgba(255,255,255,0.03);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.06);}
+.gradient-text{background:linear-gradient(135deg,#0ABFBC,#818CF8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.gradient-brand{background:linear-gradient(135deg,#0ABFBC,#4F46E5,#7C3AED);}
+
+/* Nav */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(5,10,20,0.9);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,0.05);padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;}
+.nav-logo{display:flex;align-items:center;gap:.75rem;text-decoration:none;}
+.logo-icon{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#0ABFBC,#4F46E5);display:flex;align-items:center;justify-content:center;font-size:.75rem;color:white;}
+.nav-tabs{display:flex;gap:.25rem;}
+.nav-tab{padding:.5rem 1rem;border-radius:.5rem;font-size:.8rem;font-weight:500;cursor:pointer;transition:all .2s;color:#64748B;border:none;background:transparent;}
+.nav-tab.active,.nav-tab:hover{background:rgba(10,191,188,0.1);color:#0ABFBC;}
+.nav-badge{font-size:.6rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:.2rem .5rem;border-radius:9999px;background:rgba(10,191,188,0.1);color:#0ABFBC;border:1px solid rgba(10,191,188,0.3);}
+
+/* Sections */
+.section{display:none;padding-top:5rem;min-height:100vh;}
+.section.active{display:block;}
+
+/* Canvas containers */
+.viz-canvas{width:100%;border-radius:1rem;overflow:hidden;cursor:grab;position:relative;}
+.viz-canvas:active{cursor:grabbing;}
+.canvas-label{position:absolute;bottom:1rem;left:1rem;font-size:.7rem;color:rgba(255,255,255,0.3);font-family:monospace;pointer-events:none;}
+
+/* Score rings */
+.score-ring{position:relative;display:inline-flex;align-items:center;justify-content:center;}
+.score-ring svg{transform:rotate(-90deg);}
+.score-ring .score-val{position:absolute;text-align:center;}
+
+/* Training */
+.training-log{font-family:monospace;font-size:.75rem;color:#0ABFBC;height:200px;overflow-y:auto;padding:1rem;background:rgba(0,0,0,0.4);border-radius:.75rem;border:1px solid rgba(10,191,188,0.15);}
+.training-log::-webkit-scrollbar{width:3px;}
+.training-log::-webkit-scrollbar-track{background:transparent;}
+.training-log::-webkit-scrollbar-thumb{background:rgba(10,191,188,0.3);}
+
+/* Insight card */
+.insight-card{border-left:3px solid var(--teal);transition:all .3s;}
+.insight-card:hover{transform:translateX(4px);}
+
+/* Pulse animation */
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.6;transform:scale(.95);}}
+.pulse{animation:pulse 2s ease-in-out infinite;}
+
+@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}
+.float{animation:float 4s ease-in-out infinite;}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px);}to{opacity:1;transform:translateY(0);}}
+.fade-up{animation:fadeUp .6s ease forwards;}
+
+@keyframes glow{from{box-shadow:0 0 20px rgba(10,191,188,0.2);}to{box-shadow:0 0 40px rgba(10,191,188,0.5);}}
+.glow-animate{animation:glow 2s ease-in-out infinite alternate;}
+
+/* Progress bar */
+.progress-bar{height:4px;border-radius:9999px;background:rgba(255,255,255,0.05);overflow:hidden;}
+.progress-fill{height:100%;border-radius:9999px;transition:width 1s ease;}
+
+/* Loss chart */
+#lossCanvas{border-radius:.5rem;background:rgba(0,0,0,0.3);}
+
+/* Mobile responsive */
+@media(max-width:768px){
+  .grid-2{grid-template-columns:1fr!important;}
+  .grid-3{grid-template-columns:1fr!important;}
+  nav{padding:.75rem 1rem;}
+  .nav-tabs{gap:.1rem;}
+  .nav-tab{padding:.4rem .6rem;font-size:.7rem;}
+}
+
+/* Tooltip */
+.tooltip{position:absolute;background:rgba(15,23,42,0.95);border:1px solid rgba(255,255,255,0.1);border-radius:.5rem;padding:.5rem .75rem;font-size:.75rem;pointer-events:none;z-index:50;white-space:nowrap;transition:opacity .2s;}
+
+/* Score card hover */
+.score-card{transition:all .3s;cursor:pointer;}
+.score-card:hover{transform:translateY(-4px);border-color:rgba(10,191,188,0.3);}
+
+/* Metric value animation */
+@keyframes countUp{from{opacity:0;}to{opacity:1;}}
+.count-animate{animation:countUp .8s ease forwards;}
+</style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+  <a href="/" class="nav-logo">
+    <div class="logo-icon"><i class="fas fa-circle-nodes"></i></div>
+    <span style="color:white;font-weight:700;font-size:1.1rem;">Digest<span class="gradient-text">IQ</span></span>
+  </a>
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="showSection('engine')"><i class="fas fa-brain mr-1"></i>Engine</button>
+    <button class="nav-tab" onclick="showSection('training')"><i class="fas fa-dumbbell mr-1"></i>Training</button>
+    <button class="nav-tab" onclick="showSection('scores')"><i class="fas fa-chart-line mr-1"></i>Scores</button>
+    <button class="nav-tab" onclick="showSection('visualize')"><i class="fas fa-cube mr-1"></i>3D Viz</button>
+    <button class="nav-tab" onclick="showSection('insights')"><i class="fas fa-sparkles mr-1"></i>AI Insights</button>
+  </div>
+  <div class="nav-badge"><span id="modelStatus" class="pulse">● LIVE</span></div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════
+     SECTION 1: ENGINE OVERVIEW
+═══════════════════════════════════════════════════════ -->
+<section id="engine" class="section active px-6 py-8">
+<div style="max-width:1200px;margin:0 auto;">
+
+  <div class="text-center mb-12 fade-up">
+    <div style="display:inline-flex;align-items:center;gap:.5rem;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:.3rem .8rem;border-radius:9999px;background:rgba(10,191,188,0.08);color:#0ABFBC;border:1px solid rgba(10,191,188,0.2);margin-bottom:1.5rem;">
+      <span class="pulse" style="width:6px;height:6px;border-radius:50%;background:#0ABFBC;display:inline-block;"></span>
+      Intelligence Engine · v1.0 · Powered by DigestIQ ML
+    </div>
+    <h1 style="font-size:3rem;font-weight:900;color:white;line-height:1.1;margin-bottom:1rem;">
+      The Digestive<br/><span class="gradient-text">Intelligence Engine</span>
+    </h1>
+    <p style="color:#64748B;max-width:600px;margin:0 auto;line-height:1.7;">
+      Six proprietary ML models trained on synthesized GI physiology data — processing raw sensor telemetry into calibrated wellness scores, then narrated by AI into human-centered insights.
+    </p>
+  </div>
+
+  <!-- Pipeline Diagram -->
+  <div class="glass rounded-2xl p-8 mb-8 fade-up">
+    <h2 style="color:white;font-weight:700;margin-bottom:1.5rem;display:flex;align-items:center;gap:.5rem;">
+      <i class="fas fa-sitemap" style="color:#0ABFBC;"></i> Intelligence Pipeline
+    </h2>
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;justify-content:center;" id="pipelineSteps">
+    </div>
+  </div>
+
+  <!-- Architecture Cards -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;" class="grid-3">
+    <div class="glass-light rounded-2xl p-6 score-card fade-up">
+      <div style="width:48px;height:48px;border-radius:12px;background:rgba(10,191,188,0.1);display:flex;align-items:center;justify-content:center;margin-bottom:1.25rem;">
+        <i class="fas fa-microchip" style="color:#0ABFBC;"></i>
+      </div>
+      <h3 style="color:white;font-weight:700;margin-bottom:.75rem;">Signal Processing</h3>
+      <p style="color:#475569;font-size:.85rem;line-height:1.6;">Raw sensor telemetry ingested, noise-filtered, time-synchronized, and decomposed into biological feature vectors for ML consumption.</p>
+      <div style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:.4rem;">
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(10,191,188,0.08);color:#0ABFBC;border:1px solid rgba(10,191,188,0.15);">pH Normalization</span>
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(10,191,188,0.08);color:#0ABFBC;border:1px solid rgba(10,191,188,0.15);">Transit Windowing</span>
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(10,191,188,0.08);color:#0ABFBC;border:1px solid rgba(10,191,188,0.15);">Noise Filtering</span>
+      </div>
+    </div>
+    <div class="glass-light rounded-2xl p-6 score-card fade-up" style="animation-delay:.1s;">
+      <div style="width:48px;height:48px;border-radius:12px;background:rgba(79,70,229,0.1);display:flex;align-items:center;justify-content:center;margin-bottom:1.25rem;">
+        <i class="fas fa-brain" style="color:#818CF8;"></i>
+      </div>
+      <h3 style="color:white;font-weight:700;margin-bottom:.75rem;">ML Scoring Models</h3>
+      <p style="color:#475569;font-size:.85rem;line-height:1.6;">Six TensorFlow.js neural networks compute wellness scores from feature vectors. Models train on synthetic GI data and improve with real sessions.</p>
+      <div style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:.4rem;">
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(79,70,229,0.08);color:#818CF8;border:1px solid rgba(79,70,229,0.15);">TensorFlow.js</span>
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(79,70,229,0.08);color:#818CF8;border:1px solid rgba(79,70,229,0.15);">Dense Networks</span>
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(79,70,229,0.08);color:#818CF8;border:1px solid rgba(79,70,229,0.15);">6 Models</span>
+      </div>
+    </div>
+    <div class="glass-light rounded-2xl p-6 score-card fade-up" style="animation-delay:.2s;">
+      <div style="width:48px;height:48px;border-radius:12px;background:rgba(124,58,237,0.1);display:flex;align-items:center;justify-content:center;margin-bottom:1.25rem;">
+        <i class="fas fa-comment-dots" style="color:#A78BFA;"></i>
+      </div>
+      <h3 style="color:white;font-weight:700;margin-bottom:.75rem;">LLM Narrative Layer</h3>
+      <p style="color:#475569;font-size:.85rem;line-height:1.6;">Structured ML outputs fed to Llama 3.3 70B via DigestIQ Intelligence API. Converts scores into calm, scientifically responsible wellness narratives.</p>
+      <div style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:.4rem;">
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(124,58,237,0.08);color:#A78BFA;border:1px solid rgba(124,58,237,0.15);">Safety Layer</span>
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(124,58,237,0.08);color:#A78BFA;border:1px solid rgba(124,58,237,0.15);">Non-diagnostic</span>
+        <span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(124,58,237,0.08);color:#A78BFA;border:1px solid rgba(124,58,237,0.15);">Structured Input</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Ontology -->
+  <div class="glass rounded-2xl p-8 mt-8 fade-up">
+    <h2 style="color:white;font-weight:700;margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem;">
+      <i class="fas fa-database" style="color:#F59E0B;"></i> Digestive Data Ontology
+    </h2>
+    <p style="color:#475569;font-size:.85rem;margin-bottom:1.5rem;">The complete taxonomy of measurable biological signals processed by the DigestIQ engine.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;" class="grid-2">
+      <div>
+        <div style="color:#64748B;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.75rem;">Primary Signals</div>
+        <div id="ontologyPrimary"></div>
+      </div>
+      <div>
+        <div style="color:#64748B;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.75rem;">Derived Metrics</div>
+        <div id="ontologyDerived"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════
+     SECTION 2: ML TRAINING
+═══════════════════════════════════════════════════════ -->
+<section id="training" class="section px-6 py-8">
+<div style="max-width:1200px;margin:0 auto;">
+
+  <div class="text-center mb-10 fade-up">
+    <h1 style="font-size:2.5rem;font-weight:900;color:white;margin-bottom:.75rem;">ML Training <span class="gradient-text">System</span></h1>
+    <p style="color:#64748B;max-width:540px;margin:0 auto;">Watch six neural networks train in real-time on synthetic GI physiology data — right in your browser.</p>
+  </div>
+
+  <!-- Training Control Panel -->
+  <div class="glass rounded-2xl p-8 mb-8">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem;">
+      <div>
+        <h2 style="color:white;font-weight:700;font-size:1.2rem;">Training Control Panel</h2>
+        <p style="color:#475569;font-size:.8rem;margin-top:.25rem;" id="trainingStatus">Ready to train · 6 models · Synthetic GI dataset</p>
+      </div>
+      <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+        <button onclick="generateData()" id="genBtn" style="padding:.6rem 1.25rem;border-radius:.6rem;border:1px solid rgba(10,191,188,0.3);background:rgba(10,191,188,0.08);color:#0ABFBC;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s;" onmouseover="this.style.background='rgba(10,191,188,0.15)'" onmouseout="this.style.background='rgba(10,191,188,0.08)'">
+          <i class="fas fa-flask mr-2"></i>Generate Data
+        </button>
+        <button onclick="trainAllModels()" id="trainBtn" disabled style="padding:.6rem 1.25rem;border-radius:.6rem;border:1px solid rgba(79,70,229,0.3);background:rgba(79,70,229,0.08);color:#818CF8;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s;opacity:.5;">
+          <i class="fas fa-play mr-2"></i>Train All Models
+        </button>
+        <button onclick="resetModels()" style="padding:.6rem 1.25rem;border-radius:.6rem;border:1px solid rgba(255,255,255,0.08);background:transparent;color:#475569;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s;" onmouseover="this.style.color='#94A3B8'" onmouseout="this.style.color='#475569'">
+          <i class="fas fa-rotate mr-2"></i>Reset
+        </button>
+      </div>
+    </div>
+
+    <!-- Dataset Stats -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem;" class="grid-2" id="dataStats">
+      <div class="glass-light rounded-xl p-4 text-center">
+        <div style="font-size:1.8rem;font-weight:900;color:#0ABFBC;" id="statSamples">0</div>
+        <div style="color:#475569;font-size:.75rem;margin-top:.25rem;">Training Samples</div>
+      </div>
+      <div class="glass-light rounded-xl p-4 text-center">
+        <div style="font-size:1.8rem;font-weight:900;color:#818CF8;" id="statFeatures">0</div>
+        <div style="color:#475569;font-size:.75rem;margin-top:.25rem;">Feature Dimensions</div>
+      </div>
+      <div class="glass-light rounded-xl p-4 text-center">
+        <div style="font-size:1.8rem;font-weight:900;color:#A78BFA;" id="statEpochs">0</div>
+        <div style="color:#475569;font-size:.75rem;margin-top:.25rem;">Epochs Trained</div>
+      </div>
+      <div class="glass-light rounded-xl p-4 text-center">
+        <div style="font-size:1.8rem;font-weight:900;color:#10B981;" id="statAccuracy">—</div>
+        <div style="color:#475569;font-size:.75rem;margin-top:.25rem;">Avg Accuracy</div>
+      </div>
+    </div>
+
+    <!-- Loss Chart -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;" class="grid-2">
+      <div>
+        <div style="color:#64748B;font-size:.75rem;font-weight:600;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.05em;">Training Loss Curve</div>
+        <canvas id="lossCanvas" width="500" height="200"></canvas>
+      </div>
+      <div>
+        <div style="color:#64748B;font-size:.75rem;font-weight:600;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.05em;">Training Log</div>
+        <div class="training-log" id="trainingLog">
+          <div style="color:#334155;">DigestIQ ML Engine initialized</div>
+          <div style="color:#334155;">TensorFlow.js v4.17 loaded</div>
+          <div style="color:#334155;">Awaiting data generation...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Individual Model Cards -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;" class="grid-3" id="modelCards"></div>
+
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════
+     SECTION 3: SCORING ENGINES
+═══════════════════════════════════════════════════════ -->
+<section id="scores" class="section px-6 py-8">
+<div style="max-width:1200px;margin:0 auto;">
+
+  <div class="text-center mb-10 fade-up">
+    <h1 style="font-size:2.5rem;font-weight:900;color:white;margin-bottom:.75rem;">6 Scoring <span class="gradient-text">Engines</span></h1>
+    <p style="color:#64748B;max-width:540px;margin:0 auto;">Run a live session through the ML pipeline and watch all six engines compute your scores in real time.</p>
+  </div>
+
+  <!-- Session Input Panel -->
+  <div class="glass rounded-2xl p-8 mb-8 fade-up">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem;">
+      <h2 style="color:white;font-weight:700;">Session Input Simulator</h2>
+      <div style="display:flex;gap:.75rem;">
+        <button onclick="randomizeSession()" style="padding:.5rem 1rem;border-radius:.6rem;border:1px solid rgba(255,255,255,0.1);background:transparent;color:#64748B;font-size:.8rem;cursor:pointer;" onmouseover="this.style.color='#94A3B8'" onmouseout="this.style.color='#64748B'">
+          <i class="fas fa-shuffle mr-1"></i>Randomize
+        </button>
+        <button onclick="runScoring()" id="scoreBtn" style="padding:.5rem 1.25rem;border-radius:.6rem;border:none;background:linear-gradient(135deg,#0ABFBC,#4F46E5);color:white;font-size:.85rem;font-weight:700;cursor:pointer;transition:all .2s;">
+          <i class="fas fa-bolt mr-1"></i>Run ML Scoring
+        </button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;" class="grid-3" id="sessionInputs">
+    </div>
+  </div>
+
+  <!-- Score Cards -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;margin-bottom:2rem;" class="grid-3" id="scoreCards">
+  </div>
+
+  <!-- Score Details Expanded -->
+  <div class="glass rounded-2xl p-8 fade-up" id="scoreDetails" style="display:none;">
+    <h2 style="color:white;font-weight:700;margin-bottom:1.5rem;">
+      <i class="fas fa-magnifying-glass-chart mr-2" style="color:#818CF8;"></i>Score Breakdown
+    </h2>
+    <div id="scoreBreakdown"></div>
+  </div>
+
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════
+     SECTION 4: 3D VISUALIZATION
+═══════════════════════════════════════════════════════ -->
+<section id="visualize" class="section px-6 py-8">
+<div style="max-width:1200px;margin:0 auto;">
+
+  <div class="text-center mb-10 fade-up">
+    <h1 style="font-size:2.5rem;font-weight:900;color:white;margin-bottom:.75rem;">3D Biological <span class="gradient-text">Observability</span></h1>
+    <p style="color:#64748B;max-width:540px;margin:0 auto;">Living 3D representations of your digestive intelligence. Drag to rotate. Scroll to zoom. Click a score to explore.</p>
+  </div>
+
+  <!-- Main Intelligence Orb -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1.5rem;" class="grid-2">
+    <div class="glass rounded-2xl overflow-hidden" style="position:relative;">
+      <div style="position:absolute;top:1rem;left:1rem;z-index:10;display:flex;align-items:center;gap:.5rem;">
+        <div style="width:8px;height:8px;border-radius:50%;background:#0ABFBC;" class="pulse"></div>
+        <span style="color:#94A3B8;font-size:.75rem;font-weight:600;">Intelligence Orb</span>
+      </div>
+      <canvas id="orbCanvas" style="width:100%;height:380px;display:block;cursor:grab;"></canvas>
+      <div style="position:absolute;bottom:1rem;left:1rem;right:1rem;display:flex;justify-content:space-between;align-items:flex-end;pointer-events:none;">
+        <div>
+          <div style="font-size:2.5rem;font-weight:900;color:white;" id="orbScore">--</div>
+          <div style="color:#64748B;font-size:.75rem;">Digestive Intelligence Score</div>
+        </div>
+        <div style="text-align:right;font-size:.7rem;color:#334155;font-family:monospace;" id="orbInfo">Drag to rotate</div>
+      </div>
+    </div>
+
+    <!-- Transit Flow -->
+    <div class="glass rounded-2xl overflow-hidden" style="position:relative;">
+      <div style="position:absolute;top:1rem;left:1rem;z-index:10;display:flex;align-items:center;gap:.5rem;">
+        <div style="width:8px;height:8px;border-radius:50%;background:#818CF8;" class="pulse"></div>
+        <span style="color:#94A3B8;font-size:.75rem;font-weight:600;">Transit Flow</span>
+      </div>
+      <canvas id="transitCanvas" style="width:100%;height:380px;display:block;cursor:grab;"></canvas>
+      <div style="position:absolute;bottom:1rem;left:1rem;pointer-events:none;">
+        <div style="font-size:2.5rem;font-weight:900;color:white;" id="transitScore">--</div>
+        <div style="color:#64748B;font-size:.75rem;">Transit Efficiency Score</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;" class="grid-2">
+    <!-- pH/Temp Field -->
+    <div class="glass rounded-2xl overflow-hidden" style="position:relative;">
+      <div style="position:absolute;top:1rem;left:1rem;z-index:10;display:flex;align-items:center;gap:.5rem;">
+        <div style="width:8px;height:8px;border-radius:50%;background:#F59E0B;" class="pulse"></div>
+        <span style="color:#94A3B8;font-size:.75rem;font-weight:600;">pH · Temperature Field</span>
+      </div>
+      <canvas id="phCanvas" style="width:100%;height:320px;display:block;cursor:grab;"></canvas>
+      <div style="position:absolute;bottom:1rem;left:1rem;pointer-events:none;">
+        <div style="font-size:2.5rem;font-weight:900;color:white;" id="stabilityScore">--</div>
+        <div style="color:#64748B;font-size:.75rem;">Digestive Stability Score</div>
+      </div>
+    </div>
+
+    <!-- Longitudinal Galaxy -->
+    <div class="glass rounded-2xl overflow-hidden" style="position:relative;">
+      <div style="position:absolute;top:1rem;left:1rem;z-index:10;display:flex;align-items:center;gap:.5rem;">
+        <div style="width:8px;height:8px;border-radius:50%;background:#10B981;" class="pulse"></div>
+        <span style="color:#94A3B8;font-size:.75rem;font-weight:600;">Session History Galaxy</span>
+      </div>
+      <canvas id="galaxyCanvas" style="width:100%;height:320px;display:block;cursor:grab;"></canvas>
+      <div style="position:absolute;bottom:1rem;left:1rem;pointer-events:none;">
+        <div style="font-size:2rem;font-weight:900;color:white;" id="galaxyLabel">28 Sessions</div>
+        <div style="color:#64748B;font-size:.75rem;">Longitudinal Intelligence</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Viz Controls -->
+  <div class="glass-light rounded-xl p-4 mt-4 flex items-center justify-between flex-wrap gap-3">
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+      <button onclick="updateVizFromScores()" style="padding:.4rem .9rem;border-radius:.5rem;border:1px solid rgba(10,191,188,0.25);background:rgba(10,191,188,0.06);color:#0ABFBC;font-size:.8rem;cursor:pointer;">
+        <i class="fas fa-sync mr-1"></i>Sync with Scores
+      </button>
+      <button onclick="animateAllViz(true)" style="padding:.4rem .9rem;border-radius:.5rem;border:1px solid rgba(255,255,255,0.08);background:transparent;color:#64748B;font-size:.8rem;cursor:pointer;">
+        <i class="fas fa-play mr-1"></i>Auto-animate
+      </button>
+    </div>
+    <div style="color:#334155;font-size:.75rem;font-family:monospace;">WebGL · Three.js · GPU-accelerated</div>
+  </div>
+
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════
+     SECTION 5: AI INSIGHTS
+═══════════════════════════════════════════════════════ -->
+<section id="insights" class="section px-6 py-8">
+<div style="max-width:1200px;margin:0 auto;">
+
+  <div class="text-center mb-10 fade-up">
+    <h1 style="font-size:2.5rem;font-weight:900;color:white;margin-bottom:.75rem;">AI Wellness <span class="gradient-text">Narratives</span></h1>
+    <p style="color:#64748B;max-width:540px;margin:0 auto;">Structured ML scores narrated into calm, scientifically responsible wellness insights by DigestIQ Intelligence.</p>
+  </div>
+
+  <!-- Generate Insight Panel -->
+  <div class="glass rounded-2xl p-8 mb-8 fade-up">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:1.5rem;">
+      <div style="flex:1;min-width:260px;">
+        <h2 style="color:white;font-weight:700;margin-bottom:.5rem;">Generate Session Narrative</h2>
+        <p style="color:#475569;font-size:.85rem;margin-bottom:1.25rem;">DigestIQ Intelligence Engine processes your ML scores and generates a personalized wellness observation.</p>
+        <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+          <button onclick="generateInsight('summary')" style="padding:.6rem 1.25rem;border-radius:.6rem;border:none;background:linear-gradient(135deg,#0ABFBC,#4F46E5);color:white;font-size:.85rem;font-weight:700;cursor:pointer;">
+            <i class="fas fa-sparkles mr-2"></i>Generate Insight
+          </button>
+          <button onclick="generateInsight('food')" style="padding:.6rem 1rem;border-radius:.6rem;border:1px solid rgba(16,185,129,0.3);background:rgba(16,185,129,0.06);color:#10B981;font-size:.8rem;cursor:pointer;">
+            <i class="fas fa-utensils mr-1"></i>Food Analysis
+          </button>
+          <button onclick="generateInsight('trend')" style="padding:.6rem 1rem;border-radius:.6rem;border:1px solid rgba(124,58,237,0.3);background:rgba(124,58,237,0.06);color:#A78BFA;font-size:.8rem;cursor:pointer;">
+            <i class="fas fa-chart-line mr-1"></i>Trend Report
+          </button>
+        </div>
+      </div>
+      <!-- Safety indicators -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;min-width:240px;">
+        <div style="background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.15);border-radius:.75rem;padding:.75rem;display:flex;align-items:center;gap:.5rem;">
+          <i class="fas fa-shield-check" style="color:#10B981;font-size:.8rem;"></i>
+          <span style="font-size:.72rem;color:#10B981;font-weight:600;">Non-diagnostic</span>
+        </div>
+        <div style="background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.15);border-radius:.75rem;padding:.75rem;display:flex;align-items:center;gap:.5rem;">
+          <i class="fas fa-lock" style="color:#10B981;font-size:.8rem;"></i>
+          <span style="font-size:.72rem;color:#10B981;font-weight:600;">Safety Layer Active</span>
+        </div>
+        <div style="background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.15);border-radius:.75rem;padding:.75rem;display:flex;align-items:center;gap:.5rem;">
+          <i class="fas fa-eye" style="color:#10B981;font-size:.8rem;"></i>
+          <span style="font-size:.72rem;color:#10B981;font-weight:600;">Explainable AI</span>
+        </div>
+        <div style="background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.15);border-radius:.75rem;padding:.75rem;display:flex;align-items:center;gap:.5rem;">
+          <i class="fas fa-person-chalkboard" style="color:#10B981;font-size:.8rem;"></i>
+          <span style="font-size:.72rem;color:#10B981;font-weight:600;">Wellness Only</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Insight Output -->
+  <div class="glass rounded-2xl p-8 mb-6 fade-up" id="insightOutput" style="min-height:200px;">
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem;">
+      <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#0ABFBC,#4F46E5);display:flex;align-items:center;justify-content:center;">
+        <i class="fas fa-brain" style="color:white;font-size:.85rem;"></i>
+      </div>
+      <div>
+        <div style="color:white;font-weight:700;" id="insightTitle">DigestIQ Intelligence Engine</div>
+        <div style="color:#475569;font-size:.75rem;" id="insightMeta">Ready to generate your wellness insight</div>
+      </div>
+      <div style="margin-left:auto;" id="insightBadge"></div>
+    </div>
+    <div id="insightText" style="color:#94A3B8;font-size:.9rem;line-height:1.75;min-height:100px;white-space:pre-wrap;">
+Click "Generate Insight" above to receive a personalized wellness narrative based on your current ML scores.
+
+The DigestIQ Intelligence Engine will analyze your session data and produce a calm, scientifically responsible wellness observation — powered by our proprietary AI pipeline.
+    </div>
+    <div id="insightLoading" style="display:none;padding:2rem;text-align:center;">
+      <div style="display:inline-flex;align-items:center;gap:.75rem;color:#0ABFBC;">
+        <i class="fas fa-circle-notch fa-spin"></i>
+        <span style="font-size:.85rem;" id="loadingText">Processing through DigestIQ Intelligence Engine...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Safety Architecture Display -->
+  <div class="glass-light rounded-2xl p-6 mb-6 fade-up">
+    <h3 style="color:white;font-weight:700;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem;">
+      <i class="fas fa-shield-halved" style="color:#0ABFBC;"></i> AI Safety Architecture
+    </h3>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;" class="grid-3" id="safetyRules"></div>
+  </div>
+
+  <!-- Prompt Architecture (transparent for investors) -->
+  <div class="glass-light rounded-2xl p-6 fade-up">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;cursor:pointer;" onclick="togglePromptView()">
+      <h3 style="color:white;font-weight:700;display:flex;align-items:center;gap:.5rem;">
+        <i class="fas fa-code" style="color:#818CF8;"></i> LLM Prompt Architecture
+        <span style="font-size:.7rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(129,140,248,0.1);color:#818CF8;border:1px solid rgba(129,140,248,0.2);">Transparent</span>
+      </h3>
+      <i class="fas fa-chevron-down" style="color:#475569;" id="promptChevron"></i>
+    </div>
+    <div id="promptView" style="display:none;">
+      <div style="background:rgba(0,0,0,0.4);border-radius:.75rem;padding:1.25rem;font-family:monospace;font-size:.75rem;color:#64748B;line-height:1.7;overflow-x:auto;" id="promptDisplay"></div>
+    </div>
+  </div>
+
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════
+     JAVASCRIPT ENGINE
+═══════════════════════════════════════════════════════ -->
+<script>
+// ─── Global State ─────────────────────────────────────────────────────────
+const STATE = {
+  models: {},
+  trainingData: null,
+  scores: { dis: 0, transit: 0, stability: 0, rhythm: 0, food: 0, recovery: 0 },
+  sessionInputs: {},
+  isTraining: false,
+  lossHistory: [],
+  vizAnimating: true,
+  orbScene: null, transitScene: null, phScene: null, galaxyScene: null,
+  currentInsightType: 'summary'
+};
+
+const MODEL_DEFS = [
+  { id: 'dis', name: 'Intelligence Score', color: '#0ABFBC', icon: 'brain', desc: 'Composite wellness score — weighted ensemble of all five sub-scores.', features: ['phMean','phVar','transitTime','tempMean','motility','stability','rhythmScore'] },
+  { id: 'transit', name: 'Transit Efficiency', color: '#818CF8', icon: 'route', desc: 'How efficiently the capsule traversed your GI tract relative to personal baseline.', features: ['transitTime','motility','gastricDuration','smallBowelDuration','colonic'] },
+  { id: 'stability', name: 'Digestive Stability', color: '#F59E0B', icon: 'water', desc: 'Variance in pH and temperature across GI segments — lower variance = higher stability.', features: ['phVar','tempVar','phMin','phMax','tempMin','tempMax','transitions'] },
+  { id: 'rhythm', name: 'Digestive Rhythm', color: '#A78BFA', icon: 'wave-square', desc: 'Session-to-session consistency of your digestive patterns over time.', features: ['sessionConsistency','timeOfDay','mealTiming','hydration','sleep'] },
+  { id: 'food', name: 'Food Response', color: '#10B981', icon: 'leaf', desc: 'How favorably your GI system responded to today\'s meal composition.', features: ['mealFat','mealFiber','mealProtein','mealCarbs','transitDelta','phResponse'] },
+  { id: 'recovery', name: 'Recovery Score', color: '#FB923C', icon: 'heart-pulse', desc: 'Speed and completeness of pH/environment normalization after stress events.', features: ['recoveryTime','phNormalization','tempNormalization','stressEvents','baseline'] }
+];
+
+const SESSION_INPUT_DEFS = [
+  { id: 'transitHrs', label: 'Transit Time (hrs)', min: 3, max: 24, step: 0.5, default: 7, unit: 'h', color: '#818CF8' },
+  { id: 'phMean', label: 'Mean pH', min: 1, max: 9, step: 0.1, default: 6.4, unit: '', color: '#F59E0B' },
+  { id: 'phVar', label: 'pH Variance', min: 0, max: 3, step: 0.1, default: 0.8, unit: '', color: '#F59E0B' },
+  { id: 'tempMean', label: 'Mean Temp (°C)', min: 36, max: 38.5, step: 0.1, default: 37.1, unit: '°', color: '#EF4444' },
+  { id: 'motility', label: 'Motility Index', min: 0, max: 100, step: 1, default: 74, unit: '', color: '#0ABFBC' },
+  { id: 'hydration', label: 'Hydration (L)', min: 0.5, max: 4, step: 0.1, default: 2.4, unit: 'L', color: '#06B6D4' },
+  { id: 'sleep', label: 'Sleep (hrs)', min: 3, max: 10, step: 0.5, default: 7.5, unit: 'h', color: '#A78BFA' },
+  { id: 'mealFat', label: 'Meal Fat (%)', min: 0, max: 60, step: 1, default: 28, unit: '%', color: '#F97316' },
+  { id: 'mealFiber', label: 'Meal Fiber (g)', min: 0, max: 40, step: 1, default: 22, unit: 'g', color: '#10B981' },
+  { id: 'consistency', label: 'Session Consistency', min: 0, max: 100, step: 1, default: 71, unit: '', color: '#EC4899' },
+];
+
+// ─── Navigation ───────────────────────────────────────────────────────────
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (id === 'visualize') setTimeout(initAllViz, 100);
+}
+
+// ─── Pipeline Diagram ─────────────────────────────────────────────────────
+function buildPipeline() {
+  const steps = [
+    { icon: 'capsules', label: 'Capsule Telemetry', color: '#0ABFBC', sub: 'pH · Temp · Motion · Image' },
+    { icon: 'arrow-right', label: '', color: '#334155', sub: '' },
+    { icon: 'microchip', label: 'Signal Processing', color: '#818CF8', sub: 'Normalize · Filter · Extract' },
+    { icon: 'arrow-right', label: '', color: '#334155', sub: '' },
+    { icon: 'brain', label: 'ML Models ×6', color: '#A78BFA', sub: 'TensorFlow.js · Dense NN' },
+    { icon: 'arrow-right', label: '', color: '#334155', sub: '' },
+    { icon: 'chart-pie', label: 'Score Engine', color: '#F59E0B', sub: '6 Wellness Scores' },
+    { icon: 'arrow-right', label: '', color: '#334155', sub: '' },
+    { icon: 'comment-dots', label: 'LLM Narrative', color: '#10B981', sub: 'Llama 3.3 70B · Safe' },
+    { icon: 'arrow-right', label: '', color: '#334155', sub: '' },
+    { icon: 'mobile-screen', label: 'Consumer Insight', color: '#EC4899', sub: 'Calm · Clear · Safe' },
+  ];
+  const container = document.getElementById('pipelineSteps');
+  steps.forEach(s => {
+    const el = document.createElement('div');
+    if (s.label === '') {
+      el.style.cssText = `color:${s.color};font-size:1.25rem;`;
+      el.innerHTML = `<i class="fas fa-${s.icon}"></i>`;
+    } else {
+      el.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:.4rem;min-width:90px;`;
+      el.innerHTML = `
+        <div style="width:48px;height:48px;border-radius:12px;background:${s.color}15;border:1px solid ${s.color}30;display:flex;align-items:center;justify-content:center;">
+          <i class="fas fa-${s.icon}" style="color:${s.color};font-size:.9rem;"></i>
+        </div>
+        <div style="font-size:.7rem;font-weight:700;color:white;text-align:center;">${s.label}</div>
+        <div style="font-size:.6rem;color:#475569;text-align:center;">${s.sub}</div>`;
+    }
+    container.appendChild(el);
+  });
+}
+
+// ─── Data Ontology ────────────────────────────────────────────────────────
+function buildOntology() {
+  const primary = [
+    { label: 'Luminal pH', range: '1.0–9.0', color: '#F59E0B' },
+    { label: 'Mucosal Temperature', range: '36–38.5°C', color: '#EF4444' },
+    { label: 'Motility / Peristalsis', range: '0–100 index', color: '#0ABFBC' },
+    { label: 'Transit Velocity', range: '0.5–8 cm/min', color: '#818CF8' },
+    { label: 'GI Imagery Frames', range: '2–4 fps', color: '#A78BFA' },
+    { label: 'Pressure Events', range: 'event count', color: '#10B981' },
+  ];
+  const derived = [
+    { label: 'pH Variance Score', range: 'computed', color: '#F59E0B' },
+    { label: 'Transit Efficiency', range: 'vs baseline', color: '#818CF8' },
+    { label: 'Rhythm Consistency', range: '0–100', color: '#EC4899' },
+    { label: 'Food Response Delta', range: 'Δ from mean', color: '#10B981' },
+    { label: 'Recovery Speed', range: 'time to baseline', color: '#FB923C' },
+    { label: 'Digestive Intelligence', range: '0–100 composite', color: '#0ABFBC' },
+  ];
+  const renderList = (items, containerId) => {
+    const el = document.getElementById(containerId);
+    items.forEach(item => {
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex;align-items:center;justify-content:space-between;padding:.6rem .75rem;border-radius:.5rem;background:rgba(255,255,255,0.02);margin-bottom:.4rem;border:1px solid rgba(255,255,255,0.04);`;
+      row.innerHTML = `
+        <div style="display:flex;align-items:center;gap:.5rem;">
+          <div style="width:6px;height:6px;border-radius:50%;background:${item.color};flex-shrink:0;"></div>
+          <span style="font-size:.8rem;color:#CBD5E1;">${item.label}</span>
+        </div>
+        <span style="font-size:.7rem;color:#334155;font-family:monospace;">${item.range}</span>`;
+      el.appendChild(row);
+    });
+  };
+  renderList(primary, 'ontologyPrimary');
+  renderList(derived, 'ontologyDerived');
+}
+
+// ─── ML Training ──────────────────────────────────────────────────────────
+function generateSyntheticGIData(n = 2000) {
+  const data = [], labels = [];
+  for (let i = 0; i < n; i++) {
+    // Simulate realistic GI session features
+    const transitHrs = 4 + Math.random() * 16;
+    const phMean = 1 + Math.random() * 7;
+    const phVar = Math.random() * 2.5;
+    const tempMean = 36.0 + Math.random() * 2.0;
+    const tempVar = Math.random() * 0.8;
+    const motility = Math.random() * 100;
+    const hydration = 0.5 + Math.random() * 3.5;
+    const sleep = 3 + Math.random() * 7;
+    const mealFat = Math.random() * 60;
+    const mealFiber = Math.random() * 40;
+    const consistency = Math.random() * 100;
+    const stressEvents = Math.floor(Math.random() * 5);
+
+    const feat = [
+      transitHrs/24, phMean/9, phVar/3, tempMean/38.5, tempVar/2,
+      motility/100, hydration/4, sleep/10, mealFat/60, mealFiber/40,
+      consistency/100, stressEvents/5
+    ];
+
+    // Compute ground truth scores using domain knowledge rules
+    const transitScore = Math.max(0, Math.min(1,
+      1 - Math.abs(transitHrs - 7) / 14 +
+      motility/100 * 0.3 - stressEvents * 0.05
+    ));
+    const stabilityScore = Math.max(0, Math.min(1,
+      1 - phVar/3 * 0.5 - tempVar/2 * 0.3 +
+      (phMean > 5 && phMean < 8 ? 0.2 : 0)
+    ));
+    const rhythmScore = Math.max(0, Math.min(1,
+      consistency/100 * 0.6 + hydration/4 * 0.2 + sleep/10 * 0.2
+    ));
+    const foodScore = Math.max(0, Math.min(1,
+      mealFiber/40 * 0.4 + (1 - mealFat/60) * 0.3 +
+      hydration/4 * 0.2 + transitScore * 0.1
+    ));
+    const recoveryScore = Math.max(0, Math.min(1,
+      (1 - stressEvents/5) * 0.5 + stabilityScore * 0.3 + hydration/4 * 0.2
+    ));
+    const disScore = (transitScore * 0.25 + stabilityScore * 0.2 +
+      rhythmScore * 0.2 + foodScore * 0.2 + recoveryScore * 0.15);
+
+    data.push(feat);
+    labels.push([disScore, transitScore, stabilityScore, rhythmScore, foodScore, recoveryScore]);
+  }
+  return { data, labels };
+}
+
+function log(msg, color = '#0ABFBC') {
+  const el = document.getElementById('trainingLog');
+  const line = document.createElement('div');
+  line.style.color = color;
+  line.innerHTML = `<span style="color:#334155;">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function generateData() {
+  log('Generating synthetic GI physiology dataset...', '#818CF8');
+  document.getElementById('genBtn').disabled = true;
+  document.getElementById('genBtn').style.opacity = '0.5';
+  setTimeout(() => {
+    STATE.trainingData = generateSyntheticGIData(2000);
+    document.getElementById('statSamples').textContent = '2,000';
+    document.getElementById('statFeatures').textContent = '12';
+    document.getElementById('trainingStatus').textContent = 'Dataset ready · 2,000 samples · 12 features · 6 targets';
+    log(`✓ Generated 2,000 synthetic GI sessions`, '#10B981');
+    log(`  Features: pH, temp, transit, motility, hydration, sleep, diet`, '#475569');
+    log(`  Targets: 6 wellness scores (ground truth via domain rules)`, '#475569');
+    log('Ready to train. Click "Train All Models"', '#F59E0B');
+    const trainBtn = document.getElementById('trainBtn');
+    trainBtn.disabled = false; trainBtn.style.opacity = '1';
+    buildModelCards();
+  }, 800);
+}
+
+function buildModelCards() {
+  const container = document.getElementById('modelCards');
+  container.innerHTML = '';
+  MODEL_DEFS.forEach(m => {
+    const card = document.createElement('div');
+    card.id = `modelCard_${m.id}`;
+    card.className = 'glass-light rounded-2xl p-5';
+    card.style.cssText = `border:1px solid rgba(255,255,255,0.05);transition:all .3s;`;
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+        <div style="display:flex;align-items:center;gap:.6rem;">
+          <div style="width:32px;height:32px;border-radius:8px;background:${m.color}15;display:flex;align-items:center;justify-content:center;">
+            <i class="fas fa-${m.icon}" style="color:${m.color};font-size:.8rem;"></i>
+          </div>
+          <div>
+            <div style="color:white;font-weight:600;font-size:.85rem;">${m.name}</div>
+            <div style="color:#334155;font-size:.65rem;font-family:monospace;" id="modelStatus_${m.id}">Untrained</div>
+          </div>
+        </div>
+        <div style="font-size:1.5rem;font-weight:900;color:${m.color};" id="modelAcc_${m.id}">—</div>
+      </div>
+      <p style="color:#334155;font-size:.75rem;line-height:1.5;margin-bottom:.75rem;">${m.desc}</p>
+      <div class="progress-bar" style="margin-bottom:.5rem;">
+        <div class="progress-fill" id="modelProg_${m.id}" style="width:0%;background:${m.color};"></div>
+      </div>
+      <div style="font-size:.65rem;color:#334155;font-family:monospace;" id="modelLoss_${m.id}">loss: —</div>`;
+    container.appendChild(card);
+  });
+}
+
+async function trainModel(modelDef, xs, ys, targetIdx) {
+  const model = tf.sequential({
+    layers: [
+      tf.layers.dense({ inputShape: [12], units: 32, activation: 'relu',
+        kernelInitializer: 'glorotUniform' }),
+      tf.layers.dropout({ rate: 0.15 }),
+      tf.layers.dense({ units: 16, activation: 'relu' }),
+      tf.layers.dense({ units: 1, activation: 'sigmoid' })
+    ]
+  });
+  model.compile({ optimizer: tf.train.adam(0.003), loss: 'meanSquaredError', metrics: ['mae'] });
+
+  const xTensor = tf.tensor2d(xs);
+  const yTensor = tf.tensor2d(ys.map(y => [y[targetIdx]]));
+  const EPOCHS = 30;
+
+  await model.fit(xTensor, yTensor, {
+    epochs: EPOCHS, batchSize: 64, validationSplit: 0.1, shuffle: true,
+    callbacks: {
+      onEpochEnd: async (epoch, logs) => {
+        const pct = Math.round((epoch + 1) / EPOCHS * 100);
+        const el_prog = document.getElementById(`modelProg_${modelDef.id}`);
+        const el_loss = document.getElementById(`modelLoss_${modelDef.id}`);
+        const el_status = document.getElementById(`modelStatus_${modelDef.id}`);
+        if (el_prog) el_prog.style.width = pct + '%';
+        if (el_loss) el_loss.textContent = `loss: ${logs.loss.toFixed(5)} · val: ${(logs.val_loss||0).toFixed(5)}`;
+        if (el_status) el_status.textContent = `Epoch ${epoch+1}/${EPOCHS}`;
+        STATE.lossHistory.push({ model: modelDef.id, epoch, loss: logs.loss });
+        drawLossCurve();
+        document.getElementById('statEpochs').textContent = epoch + 1;
+        await tf.nextFrame();
+      }
+    }
+  });
+
+  // Evaluate
+  const pred = model.predict(xTensor);
+  const predData = await pred.data();
+  const actual = ys.map(y => y[targetIdx]);
+  const mae = predData.reduce((s, p, i) => s + Math.abs(p - actual[i]), 0) / predData.length;
+  const accuracy = Math.max(0, Math.round((1 - mae) * 100));
+
+  document.getElementById(`modelAcc_${modelDef.id}`).textContent = accuracy + '%';
+  document.getElementById(`modelStatus_${modelDef.id}`).textContent = `Trained · MAE: ${mae.toFixed(4)}`;
+  document.getElementById(`modelCard_${modelDef.id}`).style.borderColor = modelDef.color + '30';
+
+  xTensor.dispose(); yTensor.dispose(); pred.dispose();
+  return model;
+}
+
+async function trainAllModels() {
+  if (!STATE.trainingData || STATE.isTraining) return;
+  STATE.isTraining = true;
+  const btn = document.getElementById('trainBtn');
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i>Training...';
+  btn.disabled = true;
+
+  const { data, labels } = STATE.trainingData;
+  STATE.lossHistory = [];
+  let totalAcc = 0;
+
+  log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', '#1E293B');
+  log('Starting training sequence...', '#0ABFBC');
+
+  for (let i = 0; i < MODEL_DEFS.length; i++) {
+    const m = MODEL_DEFS[i];
+    log(`▶ Training model: ${m.name}`, m.color);
+    const model = await trainModel(m, data, labels, i);
+    STATE.models[m.id] = model;
+    const accEl = document.getElementById(`modelAcc_${m.id}`);
+    const acc = parseInt(accEl.textContent);
+    totalAcc += acc;
+    log(`✓ ${m.name} complete — ${acc}% accuracy`, '#10B981');
+  }
+
+  const avg = Math.round(totalAcc / MODEL_DEFS.length);
+  document.getElementById('statAccuracy').textContent = avg + '%';
+  log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━', '#1E293B');
+  log(`All models trained. Avg accuracy: ${avg}%`, '#0ABFBC');
+  log('Models ready to score sessions.', '#10B981');
+
+  STATE.isTraining = false;
+  btn.innerHTML = '<i class="fas fa-check mr-2"></i>Training Complete';
+  document.getElementById('trainingStatus').textContent = `All 6 models trained · Avg accuracy: ${avg}% · Ready for scoring`;
+}
+
+function resetModels() {
+  Object.values(STATE.models).forEach(m => m && m.dispose && m.dispose());
+  STATE.models = {};
+  STATE.trainingData = null;
+  STATE.lossHistory = [];
+  document.getElementById('modelCards').innerHTML = '';
+  document.getElementById('statSamples').textContent = '0';
+  document.getElementById('statFeatures').textContent = '0';
+  document.getElementById('statEpochs').textContent = '0';
+  document.getElementById('statAccuracy').textContent = '—';
+  document.getElementById('trainingLog').innerHTML = `
+    <div style="color:#334155;">Models reset.</div>
+    <div style="color:#334155;">Generate new data to begin.</div>`;
+  document.getElementById('trainBtn').disabled = true;
+  document.getElementById('trainBtn').style.opacity = '0.5';
+  document.getElementById('trainBtn').innerHTML = '<i class="fas fa-play mr-2"></i>Train All Models';
+  document.getElementById('genBtn').disabled = false;
+  document.getElementById('genBtn').style.opacity = '1';
+  clearLossCurve();
+}
+
+function drawLossCurve() {
+  const canvas = document.getElementById('lossCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 500, H = 200;
+  canvas.width = W; canvas.height = H;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, W, H);
+
+  const colors = MODEL_DEFS.map(m => m.color);
+  const grouped = {};
+  MODEL_DEFS.forEach(m => grouped[m.id] = []);
+  STATE.lossHistory.forEach(e => grouped[e.model]?.push(e.loss));
+
+  const allLoss = STATE.lossHistory.map(e => e.loss);
+  if (allLoss.length < 2) return;
+  const minL = Math.min(...allLoss), maxL = Math.max(...allLoss);
+
+  MODEL_DEFS.forEach((m, mi) => {
+    const losses = grouped[m.id];
+    if (losses.length < 2) return;
+    ctx.beginPath(); ctx.strokeStyle = m.color; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.8;
+    losses.forEach((l, i) => {
+      const x = (i / (losses.length - 1)) * (W - 20) + 10;
+      const y = H - 10 - ((l - minL) / (maxL - minL + 1e-9)) * (H - 20);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // Label
+    if (losses.length > 0) {
+      ctx.globalAlpha = 0.6; ctx.fillStyle = m.color;
+      ctx.font = '9px Inter'; ctx.fillText(m.name.split(' ')[0], 12, 16 + mi * 12);
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+function clearLossCurve() {
+  const canvas = document.getElementById('lossCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth || 500; canvas.height = 200;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, canvas.width, 200);
+}
+
+// ─── Session Scoring ───────────────────────────────────────────────────────
+function buildSessionInputs() {
+  const container = document.getElementById('sessionInputs');
+  SESSION_INPUT_DEFS.forEach(inp => {
+    STATE.sessionInputs[inp.id] = inp.default;
+    const div = document.createElement('div');
+    div.className = 'glass-light rounded-xl p-4';
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;">
+        <label style="color:#94A3B8;font-size:.8rem;">${inp.label}</label>
+        <span style="color:${inp.color};font-weight:700;font-size:.95rem;" id="val_${inp.id}">${inp.default}${inp.unit}</span>
+      </div>
+      <input type="range" min="${inp.min}" max="${inp.max}" step="${inp.step}" value="${inp.default}"
+        style="width:100%;accent-color:${inp.color};cursor:pointer;"
+        oninput="updateInput('${inp.id}', this.value, '${inp.unit}', '${inp.color}')"/>`;
+    container.appendChild(div);
+  });
+  buildScoreCards();
+}
+
+function updateInput(id, val, unit, color) {
+  STATE.sessionInputs[id] = parseFloat(val);
+  document.getElementById(`val_${id}`).textContent = val + unit;
+}
+
+function randomizeSession() {
+  SESSION_INPUT_DEFS.forEach(inp => {
+    const val = parseFloat((inp.min + Math.random() * (inp.max - inp.min)).toFixed(1));
+    STATE.sessionInputs[inp.id] = val;
+    const el = document.querySelector(`input[oninput*="${inp.id}"]`);
+    if (el) { el.value = val; document.getElementById(`val_${inp.id}`).textContent = val + inp.unit; }
+  });
+}
+
+function buildScoreCards() {
+  const container = document.getElementById('scoreCards');
+  container.innerHTML = '';
+  MODEL_DEFS.forEach(m => {
+    const card = document.createElement('div');
+    card.id = `scoreCard_${m.id}`;
+    card.className = 'glass-light rounded-2xl p-6 score-card';
+    card.style.cssText = `border:1px solid rgba(255,255,255,0.05);cursor:pointer;`;
+    card.onclick = () => showScoreDetail(m.id);
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+        <div style="width:40px;height:40px;border-radius:10px;background:${m.color}15;display:flex;align-items:center;justify-content:center;">
+          <i class="fas fa-${m.icon}" style="color:${m.color};"></i>
+        </div>
+        <div style="font-size:2.2rem;font-weight:900;color:${m.color};" id="scoreVal_${m.id}">—</div>
+      </div>
+      <div style="color:white;font-weight:600;font-size:.9rem;margin-bottom:.4rem;">${m.name}</div>
+      <div style="color:#334155;font-size:.75rem;margin-bottom:.75rem;" id="scoreLabel_${m.id}">Run scoring to see your result</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="scoreBar_${m.id}" style="width:0%;background:${m.color};"></div>
+      </div>`;
+    container.appendChild(card);
+  });
+}
+
+async function runScoring() {
+  const btn = document.getElementById('scoreBtn');
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>Computing...';
+  btn.disabled = true;
+
+  const inp = STATE.sessionInputs;
+  const features = [
+    (inp.transitHrs||7)/24,
+    (inp.phMean||6.4)/9,
+    (inp.phVar||0.8)/3,
+    (inp.tempMean||37.1)/38.5,
+    0.3, // tempVar default
+    (inp.motility||74)/100,
+    (inp.hydration||2.4)/4,
+    (inp.sleep||7.5)/10,
+    (inp.mealFat||28)/60,
+    (inp.mealFiber||22)/40,
+    (inp.consistency||71)/100,
+    0.2  // stressEvents default
+  ];
+
+  const hasModels = Object.keys(STATE.models).length === MODEL_DEFS.length;
+
+  for (let i = 0; i < MODEL_DEFS.length; i++) {
+    const m = MODEL_DEFS[i];
+    let score;
+    if (hasModels && STATE.models[m.id]) {
+      const tensor = tf.tensor2d([features]);
+      const pred = STATE.models[m.id].predict(tensor);
+      const val = await pred.data();
+      score = Math.round(val[0] * 100);
+      tensor.dispose(); pred.dispose();
+    } else {
+      // Fallback rule-based scoring if models not trained
+      score = computeRuleScore(m.id, inp);
+    }
+    STATE.scores[m.id] = score;
+    animateScore(m.id, score, m.color, m);
+    await new Promise(r => setTimeout(r, 150));
+  }
+
+  // Composite DIS
+  const dis = Math.round(
+    STATE.scores.transit * 0.25 + STATE.scores.stability * 0.20 +
+    STATE.scores.rhythm * 0.20 + STATE.scores.food * 0.20 + STATE.scores.recovery * 0.15
+  );
+  STATE.scores.dis = dis;
+  animateScore('dis', dis, MODEL_DEFS[0].color, MODEL_DEFS[0]);
+
+  document.getElementById('scoreDetails').style.display = 'block';
+  buildScoreBreakdown();
+  updateVizFromScores();
+
+  btn.innerHTML = '<i class="fas fa-check mr-1"></i>Scored';
+  setTimeout(() => { btn.innerHTML = '<i class="fas fa-bolt mr-1"></i>Run ML Scoring'; btn.disabled = false; }, 2000);
+}
+
+function computeRuleScore(id, inp) {
+  const t = inp.transitHrs || 7, ph = inp.phMean || 6.4, phv = inp.phVar || 0.8;
+  const mot = inp.motility || 74, hyd = inp.hydration || 2.4;
+  const sl = inp.sleep || 7.5, fat = inp.mealFat || 28;
+  const fib = inp.mealFiber || 22, cons = inp.consistency || 71;
+  switch(id) {
+    case 'transit': return Math.round(Math.max(20, Math.min(100, 100 - Math.abs(t-7)*5 + mot*0.3 - fat*0.3)));
+    case 'stability': return Math.round(Math.max(20, Math.min(100, 95 - phv*20 + (ph>5&&ph<8?10:0))));
+    case 'rhythm': return Math.round(Math.max(20, Math.min(100, cons*0.6 + hyd/4*20 + sl/10*20)));
+    case 'food': return Math.round(Math.max(20, Math.min(100, fib/40*40 + (1-fat/60)*30 + hyd/4*15)));
+    case 'recovery': return Math.round(Math.max(20, Math.min(100, hyd/4*30 + sl/10*30 + mot*0.25)));
+    default: return Math.round(Math.max(20, Math.min(100, 60 + Math.random()*20)));
+  }
+}
+
+function animateScore(id, score, color, modelDef) {
+  const val = document.getElementById(`scoreVal_${id}`);
+  const bar = document.getElementById(`scoreBar_${id}`);
+  const label = document.getElementById(`scoreLabel_${id}`);
+  if (!val) return;
+
+  let current = 0;
+  const interval = setInterval(() => {
+    current = Math.min(score, current + 3);
+    val.textContent = current;
+    if (bar) bar.style.width = current + '%';
+    if (current >= score) clearInterval(interval);
+  }, 20);
+
+  if (label) {
+    if (score >= 80) label.textContent = 'Excellent · Above personal baseline';
+    else if (score >= 65) label.textContent = 'Good · Within healthy range';
+    else if (score >= 50) label.textContent = 'Moderate · Some variability noted';
+    else label.textContent = 'Developing · Tracking for trends';
+  }
+  const card = document.getElementById(`scoreCard_${id}`);
+  if (card) card.style.borderColor = color + '30';
+}
+
+function buildScoreBreakdown() {
+  const container = document.getElementById('scoreBreakdown');
+  const inp = STATE.sessionInputs;
+  const items = MODEL_DEFS.map(m => ({
+    name: m.name, score: STATE.scores[m.id] || 0, color: m.color,
+    drivers: getScoreDrivers(m.id, inp)
+  }));
+  container.innerHTML = items.map(item => `
+    <div style="display:flex;gap:1rem;padding:1rem;border-radius:.75rem;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);margin-bottom:.75rem;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;justify-content:center;width:60px;height:60px;border-radius:12px;background:${item.color}10;flex-shrink:0;">
+        <div style="font-size:1.5rem;font-weight:900;color:${item.color};">${item.score}</div>
+      </div>
+      <div style="flex:1;min-width:200px;">
+        <div style="color:white;font-weight:600;margin-bottom:.25rem;">${item.name}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:.35rem;">
+          ${item.drivers.map(d => `<span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:${item.color}10;color:${item.color};border:1px solid ${item.color}20;">${d}</span>`).join('')}
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function getScoreDrivers(id, inp) {
+  const drivers = {
+    dis: ['Composite Score', 'Weighted Ensemble', '5 Sub-models'],
+    transit: [`Transit: ${inp.transitHrs||7}h`, `Motility: ${inp.motility||74}`, `Fat: ${inp.mealFat||28}%`],
+    stability: [`pH Mean: ${inp.phMean||6.4}`, `pH Var: ${inp.phVar||0.8}`, 'Temp Profile'],
+    rhythm: [`Consistency: ${inp.consistency||71}%`, `Sleep: ${inp.sleep||7.5}h`, `Hydration: ${inp.hydration||2.4}L`],
+    food: [`Fiber: ${inp.mealFiber||22}g`, `Fat: ${inp.mealFat||28}%`, `Hydration: ${inp.hydration||2.4}L`],
+    recovery: [`Hydration: ${inp.hydration||2.4}L`, `Sleep: ${inp.sleep||7.5}h`, 'Stress Events: 1'],
+  };
+  return drivers[id] || [];
+}
+
+function showScoreDetail(id) {
+  const m = MODEL_DEFS.find(m => m.id === id);
+  if (!m) return;
+  document.getElementById('scoreDetails').style.display = 'block';
+  document.getElementById('scoreDetails').scrollIntoView({ behavior: 'smooth' });
+}
+
+// ─── THREE.JS Visualizations ──────────────────────────────────────────────
+function getCanvasSize(canvas) {
+  const rect = canvas.getBoundingClientRect();
+  return { w: rect.width || 500, h: rect.height || 380 };
+}
+
+// Intelligence Orb
+function initOrbScene() {
+  const canvas = document.getElementById('orbCanvas');
+  if (!canvas) return;
+  const { w, h } = getCanvasSize(canvas);
+  canvas.width = w; canvas.height = h;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setSize(w, h); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x000000, 0);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, w/h, 0.1, 100);
+  camera.position.set(0, 0, 5);
+
+  // Main orb
+  const orbGeo = new THREE.SphereGeometry(1.2, 64, 64);
+  const orbMat = new THREE.MeshPhongMaterial({
+    color: 0x0ABFBC, emissive: 0x0ABFBC, emissiveIntensity: 0.15,
+    transparent: true, opacity: 0.8, wireframe: false,
+    shininess: 80
+  });
+  const orb = new THREE.Mesh(orbGeo, orbMat);
+  scene.add(orb);
+
+  // Wireframe overlay
+  const wireMat = new THREE.MeshBasicMaterial({ color: 0x0ABFBC, wireframe: true, transparent: true, opacity: 0.06 });
+  const wire = new THREE.Mesh(new THREE.SphereGeometry(1.22, 24, 24), wireMat);
+  scene.add(wire);
+
+  // Rings
+  const rings = [];
+  [1.8, 2.3, 2.9].forEach((r, i) => {
+    const ringGeo = new THREE.TorusGeometry(r, 0.015, 8, 100);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: [0x0ABFBC, 0x4F46E5, 0x7C3AED][i], transparent: true, opacity: 0.4
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI * (0.2 + i * 0.25);
+    ring.rotation.z = Math.PI * i * 0.3;
+    scene.add(ring); rings.push(ring);
+  });
+
+  // Particles
+  const partCount = 800;
+  const partGeo = new THREE.BufferGeometry();
+  const positions = new Float32Array(partCount * 3);
+  for (let i = 0; i < partCount; i++) {
+    const r = 1.5 + Math.random() * 2.5;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i*3+2] = r * Math.cos(phi);
+  }
+  partGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const partMat = new THREE.PointsMaterial({ color: 0x0ABFBC, size: 0.025, transparent: true, opacity: 0.5 });
+  const particles = new THREE.Points(partGeo, partMat);
+  scene.add(particles);
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+  const ptLight = new THREE.PointLight(0x0ABFBC, 3, 10);
+  ptLight.position.set(2, 2, 2); scene.add(ptLight);
+  const ptLight2 = new THREE.PointLight(0x4F46E5, 2, 8);
+  ptLight2.position.set(-2, -1, -2); scene.add(ptLight2);
+
+  // Mouse drag
+  let isDragging = false, lastX = 0, lastY = 0, rotX = 0, rotY = 0;
+  canvas.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+  canvas.addEventListener('touchstart', e => { isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; });
+  window.addEventListener('mouseup', () => isDragging = false);
+  window.addEventListener('touchend', () => isDragging = false);
+  canvas.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    rotY += (e.clientX - lastX) * 0.01; rotX += (e.clientY - lastY) * 0.01;
+    lastX = e.clientX; lastY = e.clientY;
+  });
+  canvas.addEventListener('touchmove', e => {
+    if (!isDragging) return;
+    rotY += (e.touches[0].clientX - lastX) * 0.01; rotX += (e.touches[0].clientY - lastY) * 0.01;
+    lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+    e.preventDefault();
+  }, { passive: false });
+
+  let t = 0;
+  function animate() {
+    requestAnimationFrame(animate);
+    t += 0.008;
+    const score = STATE.scores.dis || 50;
+    const turbulence = 1 - score / 100;
+
+    orb.rotation.y = rotY + t * 0.3;
+    orb.rotation.x = rotX + Math.sin(t * 0.5) * 0.05 * turbulence;
+    wire.rotation.y = orb.rotation.y; wire.rotation.x = orb.rotation.x;
+
+    rings.forEach((r, i) => {
+      r.rotation.y = t * (0.2 + i * 0.1) + rotY;
+      r.rotation.z = t * (0.15 + i * 0.08);
+      r.material.opacity = 0.3 + Math.sin(t + i) * 0.1 + score/100 * 0.2;
+    });
+
+    particles.rotation.y = t * 0.05 + rotY * 0.3;
+    const s = 1 + Math.sin(t * 1.5) * 0.03 * (1 + turbulence);
+    orb.scale.set(s, s, s);
+
+    // Color shifts with score
+    const hue = 0.5 - turbulence * 0.15;
+    orbMat.color.setHSL(hue, 0.9, 0.5);
+    orbMat.emissive.setHSL(hue, 0.9, 0.3);
+
+    ptLight.intensity = 2 + Math.sin(t * 2) * 0.5 + score/100;
+    renderer.render(scene, camera);
+  }
+  animate();
+  STATE.orbScene = { renderer, scene, camera, orb, rings };
+}
+
+// Transit Flow
+function initTransitScene() {
+  const canvas = document.getElementById('transitCanvas');
+  if (!canvas) return;
+  const { w, h } = getCanvasSize(canvas);
+  canvas.width = w; canvas.height = h;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setSize(w, h); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x000000, 0);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, w/h, 0.1, 100);
+  camera.position.set(0, 0, 6);
+
+  // GI Tube path points
+  const pathPoints = [
+    new THREE.Vector3(-2, 2, 0),
+    new THREE.Vector3(-1.5, 1.5, 0.5),
+    new THREE.Vector3(-0.5, 1, 0),
+    new THREE.Vector3(0, 0.5, -0.5),
+    new THREE.Vector3(0.5, 0, 0),
+    new THREE.Vector3(1, -0.5, 0.5),
+    new THREE.Vector3(1.5, -1, 0),
+    new THREE.Vector3(1, -1.8, -0.3),
+    new THREE.Vector3(0, -2, 0.2),
+    new THREE.Vector3(-0.5, -2.2, 0),
+  ];
+  const curve = new THREE.CatmullRomCurve3(pathPoints);
+
+  // Tube
+  const tubeGeo = new THREE.TubeGeometry(curve, 60, 0.12, 8, false);
+  const tubeMat = new THREE.MeshPhongMaterial({ color: 0x4F46E5, transparent: true, opacity: 0.25, shininess: 60 });
+  scene.add(new THREE.Mesh(tubeGeo, tubeMat));
+
+  // Wireframe tube
+  const wireTubeMat = new THREE.MeshBasicMaterial({ color: 0x818CF8, wireframe: true, transparent: true, opacity: 0.12 });
+  scene.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 40, 0.13, 8, false), wireTubeMat));
+
+  // Flowing particles
+  const pCount = 300;
+  const pGeo = new THREE.BufferGeometry();
+  const pPos = new Float32Array(pCount * 3);
+  const pOffsets = new Float32Array(pCount); // t offset
+  for (let i = 0; i < pCount; i++) pOffsets[i] = Math.random();
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+  const pMat = new THREE.PointsMaterial({ color: 0x0ABFBC, size: 0.06, transparent: true, opacity: 0.8 });
+  const points = new THREE.Points(pGeo, pMat);
+  scene.add(points);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const ptL = new THREE.PointLight(0x818CF8, 4, 15); ptL.position.set(0, 0, 4); scene.add(ptL);
+  const ptL2 = new THREE.PointLight(0x0ABFBC, 2, 10); ptL2.position.set(0, 0, -3); scene.add(ptL2);
+
+  let isDragging = false, lastX = 0, rotY = 0;
+  canvas.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; });
+  window.addEventListener('mouseup', () => isDragging = false);
+  canvas.addEventListener('mousemove', e => { if (isDragging) { rotY += (e.clientX - lastX) * 0.01; lastX = e.clientX; } });
+
+  let t = 0;
+  function animate() {
+    requestAnimationFrame(animate);
+    t += 0.004;
+    const speed = (STATE.scores.transit || 50) / 100;
+    const pos = pGeo.attributes.position.array;
+    for (let i = 0; i < pCount; i++) {
+      pOffsets[i] = (pOffsets[i] + 0.002 * (0.3 + speed * 0.7)) % 1;
+      const pt = curve.getPoint(pOffsets[i]);
+      pos[i*3] = pt.x + (Math.random() - 0.5) * 0.08;
+      pos[i*3+1] = pt.y + (Math.random() - 0.5) * 0.08;
+      pos[i*3+2] = pt.z + (Math.random() - 0.5) * 0.08;
+    }
+    pGeo.attributes.position.needsUpdate = true;
+    scene.rotation.y = rotY + t * 0.15;
+    renderer.render(scene, camera);
+  }
+  animate();
+}
+
+// pH / Temperature Field
+function initPhScene() {
+  const canvas = document.getElementById('phCanvas');
+  if (!canvas) return;
+  const { w, h } = getCanvasSize(canvas);
+  canvas.width = w; canvas.height = h;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setSize(w, h); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x000000, 0);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(55, w/h, 0.1, 100);
+  camera.position.set(0, 0, 5.5);
+
+  // Grid of spheres showing pH gradient
+  const segments = 10;
+  const spheres = [];
+  for (let i = 0; i < segments; i++) {
+    const t = i / (segments - 1);
+    const x = (t - 0.5) * 8;
+    // pH colors: red (acid) → yellow → green → blue (base)
+    const hue = 0 + t * 0.67;
+    const color = new THREE.Color().setHSL(hue, 0.85, 0.55);
+    const size = 0.2 + Math.sin(t * Math.PI) * 0.3;
+    const geo = new THREE.SphereGeometry(size, 16, 16);
+    const mat = new THREE.MeshPhongMaterial({ color, emissive: color, emissiveIntensity: 0.2, transparent: true, opacity: 0.85 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 0, 0);
+    scene.add(mesh); spheres.push({ mesh, mat, baseColor: color.clone(), baseY: 0, hue });
+  }
+
+  // Ambient particles
+  const apGeo = new THREE.BufferGeometry();
+  const apPos = new Float32Array(400 * 3);
+  const apCol = new Float32Array(400 * 3);
+  for (let i = 0; i < 400; i++) {
+    apPos[i*3] = (Math.random() - 0.5) * 10;
+    apPos[i*3+1] = (Math.random() - 0.5) * 4;
+    apPos[i*3+2] = (Math.random() - 0.5) * 3;
+    const t = Math.random();
+    const c = new THREE.Color().setHSL(t * 0.67, 0.8, 0.6);
+    apCol[i*3] = c.r; apCol[i*3+1] = c.g; apCol[i*3+2] = c.b;
+  }
+  apGeo.setAttribute('position', new THREE.BufferAttribute(apPos, 3));
+  apGeo.setAttribute('color', new THREE.BufferAttribute(apCol, 3));
+  const apMat = new THREE.PointsMaterial({ vertexColors: true, size: 0.04, transparent: true, opacity: 0.4 });
+  scene.add(new THREE.Points(apGeo, apMat));
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const pl = new THREE.PointLight(0xffffff, 2, 15); pl.position.set(0, 3, 3); scene.add(pl);
+
+  let isDragging = false, lastX = 0, rotY = 0;
+  canvas.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; });
+  window.addEventListener('mouseup', () => isDragging = false);
+  canvas.addEventListener('mousemove', e => { if (isDragging) { rotY += (e.clientX - lastX) * 0.012; lastX = e.clientX; } });
+
+  let t = 0;
+  function animate() {
+    requestAnimationFrame(animate);
+    t += 0.012;
+    const stability = (STATE.scores.stability || 50) / 100;
+    spheres.forEach((s, i) => {
+      const wave = Math.sin(t * 1.5 + i * 0.7) * (0.5 * (1 - stability));
+      s.mesh.position.y = wave;
+      const pulse = 0.9 + Math.sin(t * 2 + i) * 0.1;
+      s.mesh.scale.set(pulse, pulse, pulse);
+    });
+    scene.rotation.y = rotY + t * 0.08;
+    renderer.render(scene, camera);
+  }
+  animate();
+}
+
+// Longitudinal Galaxy
+function initGalaxyScene() {
+  const canvas = document.getElementById('galaxyCanvas');
+  if (!canvas) return;
+  const { w, h } = getCanvasSize(canvas);
+  canvas.width = w; canvas.height = h;
+
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setSize(w, h); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x000000, 0);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, w/h, 0.1, 100);
+  camera.position.set(0, 0, 8);
+
+  // Historical session orbs
+  const sessions = 28;
+  const sessionMeshes = [];
+  for (let i = 0; i < sessions; i++) {
+    const theta = (i / sessions) * Math.PI * 2;
+    const r = 2 + (i % 3) * 0.8;
+    const x = Math.cos(theta) * r;
+    const y = Math.sin(theta * 0.5) * 1.2 - 0.5;
+    const z = Math.sin(theta) * r * 0.4;
+    const score = 55 + Math.random() * 40;
+    const hue = score / 100 * 0.35;
+    const color = new THREE.Color().setHSL(hue, 0.8, 0.55);
+    const size = 0.08 + (score / 100) * 0.18;
+    const geo = new THREE.SphereGeometry(size, 8, 8);
+    const mat = new THREE.MeshPhongMaterial({ color, emissive: color, emissiveIntensity: 0.3, transparent: true, opacity: 0.8 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    scene.add(mesh);
+    sessionMeshes.push({ mesh, score, origPos: new THREE.Vector3(x, y, z) });
+  }
+
+  // Connection lines
+  for (let i = 0; i < sessions - 1; i++) {
+    const pts = [sessionMeshes[i].mesh.position, sessionMeshes[i+1].mesh.position];
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x1E293B, transparent: true, opacity: 0.4 });
+    scene.add(new THREE.Line(lineGeo, lineMat));
+  }
+
+  // Current session (highlighted)
+  const curGeo = new THREE.SphereGeometry(0.28, 16, 16);
+  const curMat = new THREE.MeshPhongMaterial({ color: 0x0ABFBC, emissive: 0x0ABFBC, emissiveIntensity: 0.5, transparent: true, opacity: 0.95 });
+  const curMesh = new THREE.Mesh(curGeo, curMat);
+  curMesh.position.set(0, 0, 0.5);
+  scene.add(curMesh);
+
+  // Background stars
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = new Float32Array(1500 * 3);
+  for (let i = 0; i < 1500; i++) {
+    starPos[i*3] = (Math.random() - 0.5) * 30;
+    starPos[i*3+1] = (Math.random() - 0.5) * 30;
+    starPos[i*3+2] = (Math.random() - 0.5) * 30;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const starMat = new THREE.PointsMaterial({ color: 0x334155, size: 0.03 });
+  scene.add(new THREE.Points(starGeo, starMat));
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const ptL = new THREE.PointLight(0x0ABFBC, 3, 15); ptL.position.set(0, 0, 3); scene.add(ptL);
+
+  let isDragging = false, lastX = 0, rotY = 0;
+  canvas.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; });
+  window.addEventListener('mouseup', () => isDragging = false);
+  canvas.addEventListener('mousemove', e => { if (isDragging) { rotY += (e.clientX - lastX) * 0.01; lastX = e.clientX; } });
+
+  let t = 0;
+  function animate() {
+    requestAnimationFrame(animate);
+    t += 0.005;
+    sessionMeshes.forEach((s, i) => {
+      s.mesh.position.y = s.origPos.y + Math.sin(t + i * 0.4) * 0.05;
+      const pulse = 0.95 + Math.sin(t * 2 + i) * 0.05;
+      s.mesh.scale.set(pulse, pulse, pulse);
+    });
+    const cs = 1 + Math.sin(t * 3) * 0.08;
+    curMesh.scale.set(cs, cs, cs);
+    scene.rotation.y = rotY + t * 0.06;
+    renderer.render(scene, camera);
+  }
+  animate();
+}
+
+function initAllViz() {
+  initOrbScene(); initTransitScene(); initPhScene(); initGalaxyScene();
+}
+
+function updateVizFromScores() {
+  const dis = STATE.scores.dis || STATE.scores.transit || 50;
+  document.getElementById('orbScore').textContent = dis || '—';
+  document.getElementById('transitScore').textContent = STATE.scores.transit || '—';
+  document.getElementById('stabilityScore').textContent = STATE.scores.stability || '—';
+}
+
+function animateAllViz(start) { STATE.vizAnimating = start; }
+
+// ─── AI Insights ──────────────────────────────────────────────────────────
+const SAFETY_RULES = [
+  { icon: 'ban', color: '#EF4444', title: 'No Diagnostic Language', desc: 'System prompt enforces zero tolerance for disease-state language.' },
+  { icon: 'scale-balanced', color: '#F59E0B', title: 'Calibrated Confidence', desc: '"This may correlate" not "this causes" — uncertainty always communicated.' },
+  { icon: 'heart', color: '#10B981', title: 'Non-alarming Tone', desc: 'Departures from baseline described calmly, never as warnings.' },
+  { icon: 'user-doctor', color: '#818CF8', title: 'Physician Deference', desc: 'Always includes prompt to consult healthcare professionals.' },
+  { icon: 'code-branch', color: '#0ABFBC', title: 'Structured Input Only', desc: 'LLM receives validated JSON scores — never raw sensor data.' },
+  { icon: 'eye', color: '#A78BFA', title: 'Explainability', desc: 'Every insight traceable to specific score inputs and thresholds.' },
+];
+
+function buildSafetyRules() {
+  const el = document.getElementById('safetyRules');
+  SAFETY_RULES.forEach(r => {
+    const div = document.createElement('div');
+    div.style.cssText = `background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:.75rem;padding:.85rem;`;
+    div.innerHTML = `
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;">
+        <i class="fas fa-${r.icon}" style="color:${r.color};font-size:.8rem;"></i>
+        <span style="color:white;font-weight:600;font-size:.8rem;">${r.title}</span>
+      </div>
+      <div style="color:#334155;font-size:.72rem;line-height:1.5;">${r.desc}</div>`;
+    el.appendChild(div);
+  });
+}
+
+const SYSTEM_PROMPT = `You are DigestIQ Intelligence Engine — a consumer wellness observability AI.
+
+CRITICAL RULES (never violate):
+1. NEVER diagnose any disease, condition, or medical state
+2. NEVER say "you have", "you suffer from", "this indicates [disease]"
+3. NEVER recommend treatments, medications, or medical procedures
+4. ALWAYS use observational language: "we observed", "this appears to correlate", "your data suggests"
+5. ALWAYS include a brief wellness disclaimer in responses
+6. NEVER express certainty — always communicate confidence levels
+7. Your role is PATTERN OBSERVATION only — not clinical assessment
+8. If data suggests something serious, say "We'd encourage you to share this observation with your healthcare provider"
+
+TONE: Calm, curious, scientifically informed, non-alarming, empowering.
+STYLE: 2-3 paragraphs. Plain language. No medical jargon without explanation.`;
+
+function buildPromptDisplay() {
+  const scores = STATE.scores;
+  const hasScores = Object.values(scores).some(s => s > 0);
+  const scoreJSON = hasScores ? JSON.stringify(scores, null, 2) : '{ "dis": 74, "transit": 78, "stability": 82, "rhythm": 69, "food": 88, "recovery": 71 }';
+
+  document.getElementById('promptDisplay').innerHTML = `
+<span style="color:#334155;">// DigestIQ Intelligence Engine — LLM Prompt Architecture</span>
+
+<span style="color:#818CF8;">SYSTEM PROMPT:</span>
+<span style="color:#10B981;">"${SYSTEM_PROMPT.slice(0, 120)}..."</span>
+
+<span style="color:#818CF8;">CONTEXT INJECTION (structured ML output):</span>
+<span style="color:#0ABFBC;">SESSION_SCORES = ${scoreJSON}</span>
+
+<span style="color:#818CF8;">USER_CONTEXT:</span>
+<span style="color:#F59E0B;">{ session_id: "sess_live", hydration: "${STATE.sessionInputs.hydration||2.4}L",
+  transit_hrs: ${STATE.sessionInputs.transitHrs||7}, meal_fiber: "${STATE.sessionInputs.mealFiber||22}g" }</span>
+
+<span style="color:#818CF8;">PROVIDER:</span> <span style="color:#A78BFA;">DigestIQ Intelligence API → meta-llama/llama-3.3-70b-instruct</span>
+<span style="color:#818CF8;">MAX_TOKENS:</span> <span style="color:#94A3B8;">500</span>
+<span style="color:#818CF8;">TEMPERATURE:</span> <span style="color:#94A3B8;">0.65</span>
+<span style="color:#818CF8;">SAFETY_LAYER:</span> <span style="color:#10B981;">ACTIVE — no diagnostic language enforced</span>`;
+}
+
+function togglePromptView() {
+  const el = document.getElementById('promptView');
+  const ch = document.getElementById('promptChevron');
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+    ch.style.transform = 'rotate(180deg)';
+    buildPromptDisplay();
+  } else {
+    el.style.display = 'none';
+    ch.style.transform = 'rotate(0deg)';
+  }
+}
+
+async function generateInsight(type) {
+  STATE.currentInsightType = type;
+  const scores = STATE.scores;
+  const hasScores = Object.values(scores).some(s => s > 0);
+
+  const mockScores = hasScores ? scores : { dis: 74, transit: 78, stability: 82, rhythm: 69, food: 88, recovery: 71 };
+  const inp = STATE.sessionInputs;
+
+  document.getElementById('insightText').style.display = 'none';
+  document.getElementById('insightLoading').style.display = 'block';
+
+  const typeLabels = { summary: 'Session Summary', food: 'Food Response Analysis', trend: 'Trend Report' };
+  document.getElementById('insightTitle').textContent = `DigestIQ Intelligence — ${typeLabels[type]}`;
+  document.getElementById('insightMeta').textContent = `Generating via DigestIQ Intelligence Engine · ${new Date().toLocaleTimeString()}`;
+
+  const prompts = {
+    summary: `Generate a DigestIQ wellness session summary based on these scores: ${JSON.stringify(mockScores)}. Session context: transit time ${inp.transitHrs||7}h, hydration ${inp.hydration||2.4}L, sleep ${inp.sleep||7.5}h. Write 2-3 paragraphs in a calm, curious, non-alarming tone. Never diagnose. Use observational wellness language only.`,
+    food: `Generate a food response wellness insight based on: Food Response Score ${mockScores.food||88}/100, meal fiber ${inp.mealFiber||22}g, meal fat ${inp.mealFat||28}%, transit score ${mockScores.transit||78}. Write 2 paragraphs describing how today's meal composition appeared to correlate with digestive response patterns. Observational only, no medical claims.`,
+    trend: `Generate a longitudinal trend wellness insight based on: 28-day data, Rhythm Score ${mockScores.rhythm||69}/100, consistency improving over 4 weeks, Digestive Intelligence Score ${mockScores.dis||74}. Write 2 paragraphs about observed behavioral trends and patterns. Calm, pattern-observational language only.`
+  };
+
+  const loadingMsgs = [
+    'Processing ML scores through safety layer...',
+    'Structuring wellness context...',
+    'Generating narrative via DigestIQ Intelligence Engine...',
+    'Applying non-diagnostic language filter...',
+    'Finalizing your wellness observation...'
+  ];
+  let mi = 0;
+  const loadInterval = setInterval(() => {
+    document.getElementById('loadingText').textContent = loadingMsgs[mi % loadingMsgs.length];
+    mi++;
+  }, 1200);
+
+  try {
+    const response = await fetch('/api/intelligence/narrative', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, scores: mockScores, context: { transitHrs: inp.transitHrs||7, hydration: inp.hydration||2.4, sleep: inp.sleep||7.5, mealFat: inp.mealFat||28, mealFiber: inp.mealFiber||22 }, prompt: prompts[type] })
+    });
+    const data = await response.json();
+    clearInterval(loadInterval);
+    document.getElementById('insightLoading').style.display = 'none';
+    document.getElementById('insightText').style.display = 'block';
+    document.getElementById('insightText').textContent = data.narrative || data.error || 'Unable to generate insight at this time.';
+    document.getElementById('insightBadge').innerHTML = `<span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(16,185,129,0.1);color:#10B981;border:1px solid rgba(16,185,129,0.2);">✓ Safety layer passed</span>`;
+  } catch (err) {
+    clearInterval(loadInterval);
+    document.getElementById('insightLoading').style.display = 'none';
+    document.getElementById('insightText').style.display = 'block';
+    document.getElementById('insightText').textContent = getFallbackInsight(type, mockScores, inp);
+    document.getElementById('insightBadge').innerHTML = `<span style="font-size:.65rem;padding:.2rem .5rem;border-radius:9999px;background:rgba(245,158,11,0.1);color:#F59E0B;border:1px solid rgba(245,158,11,0.2);">Demo mode</span>`;
+  }
+}
+
+function getFallbackInsight(type, scores, inp) {
+  const dis = scores.dis || 74, transit = scores.transit || 78;
+  const food = scores.food || 88, rhythm = scores.rhythm || 69;
+  if (type === 'summary') {
+    return `Today's digestive session showed an overall wellness pattern consistent with your recent baseline. Your Digestive Intelligence Score of ${dis}/100 reflects a session where transit timing, environmental stability, and meal response all tracked within expected ranges for your profile.\n\nYour transit phase of approximately ${inp.transitHrs||7} hours aligned closely with your rolling average, and your hydration of ${inp.hydration||2.4}L appears to have contributed positively to the rhythm patterns we observed. The pH progression across your GI segments followed a familiar arc — a detail your longitudinal model continues to refine session over session.\n\nThis summary reflects wellness pattern observations only. For any health concerns, we always encourage you to consult with a qualified healthcare professional who can provide personalized medical guidance.`;
+  }
+  if (type === 'food') {
+    return `Your Food Response Score of ${food}/100 this session suggests a favorable correlation between today's meal composition and your observed digestive response patterns. The ${inp.mealFiber||22}g of dietary fiber you logged appears to correlate with a smoother early-transit profile compared to your lower-fiber sessions over the past 30 days.\n\nThe ${inp.mealFat||28}% fat content tracked within a range we've associated with your middle-tier transit efficiency scores — a pattern worth continuing to observe across future sessions as your personal dataset grows.\n\nFood response correlations are observational patterns — they describe what we've seen in your data, not clinical cause-and-effect relationships. Your healthcare provider can give you personalized nutrition guidance based on your individual health needs.`;
+  }
+  return `Over the past 28 sessions, your Digestive Rhythm Score has been trending positively, with your current score of ${rhythm}/100 representing one of your stronger consistency readings this month. We've observed that your more consistent sleep timing and hydration patterns appear to correlate with your higher-scoring sessions.\n\nYour longitudinal digestive profile continues to develop with each session. The patterns emerging suggest your digestive system has recognizable rhythms that respond to lifestyle inputs in ways that are becoming more visible and understandable over time.\n\nLongitudinal observations describe trends in your wellness data — not clinical findings. Always consult a qualified healthcare professional for medical evaluation and personalized health guidance.`;
+}
+
+// ─── Initialize ───────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  buildPipeline();
+  buildOntology();
+  buildSessionInputs();
+  buildSafetyRules();
+  clearLossCurve();
+
+  // Show model status
+  const hasTF = typeof tf !== 'undefined';
+  document.getElementById('modelStatus').textContent = hasTF ? '● LIVE' : '● DEMO';
+});
+</script>
+</body>
+</html>

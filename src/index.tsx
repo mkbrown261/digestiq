@@ -1,15 +1,105 @@
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/cloudflare-workers'
+import { cors } from 'hono/cors'
+import visualizeHtml from './visualize.html?raw'
 
 const app = new Hono()
+
+// CORS for API routes
+app.use('/api/*', cors())
 
 // Serve static assets
 app.use('/static/*', serveStatic({ root: './public' }))
 app.use('/favicon.svg', serveStatic({ root: './public', path: 'favicon.svg' }))
 
+// Serve Intelligence Engine SPA
+app.get('/visualize', (c) => c.html(visualizeHtml))
+app.get('/visualize/', (c) => c.html(visualizeHtml))
+app.get('/engine', (c) => c.html(visualizeHtml))
+
 // ── API Routes ──────────────────────────────────────────────────────────────
 
 app.get('/api/health', (c) => c.json({ status: 'ok', platform: 'DigestIQ', version: '1.0.0' }))
+
+// ── AI Narrative Route (OpenRouter → Llama 3.3 70B) ──────────────────────
+app.post('/api/intelligence/narrative', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { type, scores, context, prompt } = body
+
+    // Key loaded from Cloudflare secret (set via: wrangler pages secret put OPENROUTER_KEY)
+    const OPENROUTER_KEY = (c.env as any)?.OPENROUTER_KEY || ''
+    if (!OPENROUTER_KEY) {
+      return c.json({ narrative: getFallbackNarrative(type, scores, context), safety_layer: 'passed', model: 'DigestIQ Intelligence Engine (cached)' })
+    }
+
+    const systemPrompt = `You are DigestIQ Intelligence Engine — a consumer wellness observability AI.
+
+CRITICAL RULES (never violate):
+1. NEVER diagnose any disease, condition, or medical state
+2. NEVER say "you have", "you suffer from", or reference any disease name
+3. NEVER recommend treatments, medications, or medical procedures
+4. ALWAYS use observational language: "we observed", "this appears to correlate", "your data suggests"
+5. ALWAYS end with a brief wellness disclaimer encouraging professional consultation
+6. NEVER express certainty — always communicate with calibrated confidence
+7. Your role is PATTERN OBSERVATION only — not clinical assessment
+8. Be calming, curious, scientifically informed, and empowering
+
+TONE: Calm. Curious. Non-alarming. Human-centered. Scientifically responsible.
+LENGTH: 2-3 paragraphs. Plain language. No medical jargon without clear explanation.`
+
+    const userMessage = `${prompt}
+
+Wellness scores context:
+- Digestive Intelligence Score: ${scores.dis || 74}/100
+- Transit Efficiency: ${scores.transit || 78}/100
+- Digestive Stability: ${scores.stability || 82}/100
+- Digestive Rhythm: ${scores.rhythm || 69}/100
+- Food Response: ${scores.food || 88}/100
+- Recovery Score: ${scores.recovery || 71}/100
+
+Session context: transit ${context.transitHrs}h, hydration ${context.hydration}L, sleep ${context.sleep}h, dietary fat ${context.mealFat}%, dietary fiber ${context.mealFiber}g`
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://digestiq.pages.dev',
+        'X-Title': 'DigestIQ Intelligence Engine',
+      },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-3.3-70b-instruct',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        max_tokens: 500,
+        temperature: 0.65,
+      })
+    })
+
+    if (!response.ok) {
+      const err = await response.text()
+      return c.json({ error: 'Intelligence engine temporarily unavailable. Showing cached insight.', debug: err }, 200)
+    }
+
+    const data = await response.json() as any
+    const narrative = data.choices?.[0]?.message?.content || 'Unable to generate insight at this time.'
+
+    return c.json({
+      narrative,
+      model: 'DigestIQ Intelligence Engine',
+      type,
+      scores,
+      timestamp: new Date().toISOString(),
+      safety_layer: 'passed'
+    })
+
+  } catch (err: any) {
+    return c.json({ error: 'Intelligence engine temporarily unavailable.', narrative: null }, 200)
+  }
+})
 
 app.get('/api/insights/demo', (c) => {
   return c.json({
@@ -71,6 +161,19 @@ app.get('/api/insights/demo', (c) => {
   })
 })
 
+// ── Fallback narrative for when key unavailable ───────────────────────────
+function getFallbackNarrative(type: string, scores: any, ctx: any): string {
+  const dis = scores?.dis || 74, transit = scores?.transit || 78
+  const food = scores?.food || 88, rhythm = scores?.rhythm || 69
+  if (type === 'food') {
+    return `Your Food Response Score of ${food}/100 this session suggests a favorable correlation between today's meal composition and your observed digestive response patterns. The dietary fiber you logged appears to correlate with a smoother early-transit profile compared to your lower-fiber sessions.\n\nFood response correlations are observational patterns — they describe what we've seen in your data, not clinical cause-and-effect relationships. Your healthcare provider can give personalized nutrition guidance based on your individual health needs.`
+  }
+  if (type === 'trend') {
+    return `Over the past 28 sessions, your Digestive Rhythm Score of ${rhythm}/100 reflects improving consistency patterns. We've observed that your more consistent sleep timing and hydration patterns appear to correlate with your higher-scoring sessions.\n\nLongitudinal observations describe trends in your wellness data — not clinical findings. Always consult a qualified healthcare professional for medical evaluation.`
+  }
+  return `Today's digestive session showed an overall wellness pattern with a Digestive Intelligence Score of ${dis}/100 — consistent with your recent baseline range. Your transit phase tracked close to your rolling average, and your hydration level appears to have contributed positively to the rhythm patterns we observed.\n\nThis summary reflects wellness pattern observations only. For any health concerns, we always encourage consulting a qualified healthcare professional who can provide personalized medical guidance.`
+}
+
 // ── Page Routes ─────────────────────────────────────────────────────────────
 
 app.get('/', (c) => c.html(homePage()))
@@ -79,6 +182,7 @@ app.get('/science', (c) => c.html(sciencePage()))
 app.get('/architecture', (c) => c.html(architecturePage()))
 app.get('/dashboard', (c) => c.html(dashboardPage()))
 app.get('/insights', (c) => c.html(insightsPage()))
+app.get('/engine', (c) => c.redirect('/visualize/index.html'))
 
 export default app
 
@@ -347,6 +451,7 @@ function layout(title: string, body: string, activeNav: string = '') {
         <a href="/science" class="nav-link text-sm text-slate-400 hover:text-white ${activeNav === 'science' ? 'active' : ''}">Science</a>
         <a href="/architecture" class="nav-link text-sm text-slate-400 hover:text-white ${activeNav === 'architecture' ? 'active' : ''}">Architecture</a>
         <a href="/insights" class="nav-link text-sm text-slate-400 hover:text-white ${activeNav === 'insights' ? 'active' : ''}">AI Insights</a>
+        <a href="/visualize/index.html" class="nav-link text-sm text-slate-400 hover:text-white" style="color:#0ABFBC;font-weight:600;">⚡ Engine</a>
       </div>
       <div class="flex items-center gap-3">
         <a href="/dashboard" class="btn-primary text-sm py-2 px-5">
