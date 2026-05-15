@@ -93,3 +93,68 @@
 
 ## Compliance Statement
 DigestIQ is a consumer wellness observability platform. It does not diagnose, treat, cure, or prevent any disease or condition. All AI insights are observational wellness patterns. Always consult a qualified healthcare professional for medical evaluation.
+
+---
+
+## Phase 3 — Real-Time Data Pipeline (COMPLETE)
+
+### Architecture
+```
+Python Simulator → POST /api/ingest → Validator → D1 telemetry table
+                                                 → Scoring Engine → D1 scores table
+                                                 → Anomaly Detection → D1 anomalies table
+
+Frontend /live → GET /api/session/:id/latest (2s poll) → Three.js orb + Charts
+```
+
+### Pipeline API Endpoints
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/device/register` | Register ingestible device |
+| POST | `/api/session/start` | Start new capsule session |
+| POST | `/api/session/:id/end` | End session + compute summary |
+| POST | `/api/ingest` | Ingest 1–100 telemetry packets |
+| GET | `/api/sessions` | List sessions |
+| GET | `/api/session/:id` | Session detail + scores |
+| GET | `/api/session/:id/latest` | Smart polling (2s frontend) |
+| GET | `/api/session/:id/scores` | Full score history |
+| GET | `/api/pipeline/status` | Pipeline health |
+
+### Scoring Engine — 6 Models
+All scores 0–100, computed deterministically per packet using rolling 30-packet window:
+- **DIS** — Digestive Intelligence Score (composite master)
+- **TE** — Transit Efficiency (peristaltic motion quality)
+- **DS** — Digestive Stability (pH + temp variance)
+- **DR** — Digestive Rhythm (inter-peak interval regularity)
+- **FR** — Food Response (zone-appropriate pH profiles)
+- **RS** — Recovery Score (post-perturbation return to baseline)
+
+### Python Simulator
+```bash
+cd simulator/
+python main.py  # → localhost:3000 by default
+
+# Production
+DIGESTIQ_API_URL=https://digestiq.pages.dev python main.py
+
+# Fast test (10 min simulated journey)
+GI_DURATION_SEC=600 python main.py
+```
+
+### D1 Database Schema
+6 tables: `devices`, `sessions`, `telemetry`, `scores`, `anomalies`, `session_summaries`
+- Database: `digestiq-production` (ID: `184172af-29e5-4a75-b2d8-31ce59b5f31c`)
+- Binding: `DB`
+- Migrations applied: local ✅ + remote ✅
+
+### Live Dashboard
+- URL: `https://digestiq.pages.dev/live`
+- Three.js animated DIS orb (color-maps 0–100)
+- 6 SVG score rings (animated `stroke-dashoffset`)
+- Chart.js rolling sensor chart (60-point pH/temp/motion)
+- Chart.js DIS history sparkline (80-point)
+- GI Zone tracker (Stomach → Duodenum → Jejunum → Ileum → Colon)
+- Packet feed (real-time, 50 rows)
+- Battery + signal strength indicators
+- 2s smart polling (`?since=<ts>` for incremental updates)
+
