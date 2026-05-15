@@ -5,5 +5,12 @@
   "pages_build_output_dir": "./dist",
   "compatibility_flags": [
     "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "digestiq-production",
+      "database_id": "184172af-29e5-4a75-b2d8-31ce59b5f31c"
+    }
   ]
 }

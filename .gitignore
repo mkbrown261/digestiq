@@ -13,6 +13,10 @@ dist/
 
 # deps
 node_modules/
+simulator/__pycache__/
+simulator/*.pyc
+**/__pycache__/
+*.pyc
 .wrangler
 
 # env

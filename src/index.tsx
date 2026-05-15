@@ -2,11 +2,15 @@ import { Hono } from 'hono'
 import { serveStatic } from 'hono/cloudflare-workers'
 import { cors } from 'hono/cors'
 import visualizeHtml from './visualize.html?raw'
+import { pipelineApi } from './pipeline/api'
 
 const app = new Hono()
 
 // CORS for API routes
 app.use('/api/*', cors())
+
+// ── Pipeline API (D1-backed real-time data routes) ─────────────
+app.route('/api', pipelineApi)
 
 // Serve static assets
 app.use('/static/*', serveStatic({ root: './public' }))
@@ -182,7 +186,7 @@ app.get('/science', (c) => c.html(sciencePage()))
 app.get('/architecture', (c) => c.html(architecturePage()))
 app.get('/dashboard', (c) => c.html(dashboardPage()))
 app.get('/insights', (c) => c.html(insightsPage()))
-app.get('/engine', (c) => c.redirect('/visualize/index.html'))
+app.get('/live', (c) => c.html(liveDashboardPage()))
 
 export default app
 
@@ -451,7 +455,8 @@ function layout(title: string, body: string, activeNav: string = '') {
         <a href="/science" class="nav-link text-sm text-slate-400 hover:text-white ${activeNav === 'science' ? 'active' : ''}">Science</a>
         <a href="/architecture" class="nav-link text-sm text-slate-400 hover:text-white ${activeNav === 'architecture' ? 'active' : ''}">Architecture</a>
         <a href="/insights" class="nav-link text-sm text-slate-400 hover:text-white ${activeNav === 'insights' ? 'active' : ''}">AI Insights</a>
-        <a href="/visualize/index.html" class="nav-link text-sm text-slate-400 hover:text-white" style="color:#0ABFBC;font-weight:600;">⚡ Engine</a>
+        <a href="/visualize" class="nav-link text-sm" style="color:#0ABFBC;font-weight:600;">⚡ Engine</a>
+        <a href="/live" class="nav-link text-sm ${activeNav === 'live' ? 'active' : ''}" style="color:#34d399;font-weight:600;">🔴 Live</a>
       </div>
       <div class="flex items-center gap-3">
         <a href="/dashboard" class="btn-primary text-sm py-2 px-5">
@@ -1817,4 +1822,922 @@ function insightsPage(): string {
   </section>
   `
   return layout('AI Insights', body, 'insights')
+}
+
+// ── Live Dashboard Page ──────────────────────────────────────────────────────
+function liveDashboardPage(): string {
+  const body = `
+  <!-- Live Dashboard Styles -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    :root {
+      --teal: #2dd4bf; --violet: #a78bfa; --rose: #fb7185;
+      --amber: #fbbf24; --emerald: #34d399; --sky: #38bdf8;
+    }
+    body { background: #020817; font-family: 'Inter', sans-serif; }
+    .live-badge { animation: pulse-badge 2s infinite; }
+    @keyframes pulse-badge {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(45,212,191,.4); }
+      50% { opacity: .8; box-shadow: 0 0 0 8px rgba(45,212,191,0); }
+    }
+    .score-ring { transition: stroke-dashoffset 0.8s cubic-bezier(.4,0,.2,1); }
+    .packet-row { animation: slideIn .3s ease; }
+    @keyframes slideIn { from { opacity:0; transform: translateX(-8px); } to { opacity:1; transform: none; } }
+    .chart-bar { transition: height .6s cubic-bezier(.4,0,.2,1); }
+    .orb-glow { animation: orb-pulse 3s ease-in-out infinite; }
+    @keyframes orb-pulse {
+      0%,100% { box-shadow: 0 0 40px rgba(45,212,191,.3), 0 0 80px rgba(167,139,250,.15); }
+      50% { box-shadow: 0 0 60px rgba(45,212,191,.5), 0 0 120px rgba(167,139,250,.3); }
+    }
+    .score-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+                  border-radius: 16px; transition: all .3s ease; }
+    .score-card:hover { border-color: rgba(45,212,191,.3); background: rgba(45,212,191,.05); }
+    #three-canvas { border-radius: 12px; }
+    .status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+    .status-active { background: #34d399; box-shadow: 0 0 8px #34d399; animation: pulse-badge 1.5s infinite; }
+    .status-idle   { background: #fbbf24; }
+    .status-offline{ background: #6b7280; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .scrollbar-hide { scrollbar-width: none; }
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+  </style>
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <section class="pt-24 pb-6 px-6 max-w-7xl mx-auto">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <div class="live-badge inline-flex items-center gap-2 bg-teal-950/60 border border-teal-500/40 rounded-full px-3 py-1">
+            <span class="status-dot status-active" id="conn-dot"></span>
+            <span class="text-teal-400 text-xs font-semibold tracking-wide" id="conn-label">CONNECTING…</span>
+          </div>
+          <span class="text-gray-500 text-xs mono" id="poll-counter">0 polls</span>
+        </div>
+        <h1 class="text-3xl font-bold text-white">Live Pipeline Dashboard</h1>
+        <p class="text-gray-400 mt-1 text-sm">Real-time telemetry from DigestIQ ingestible device → D1 → scoring engine</p>
+      </div>
+      <div class="flex gap-3 flex-wrap">
+        <div class="bg-gray-900/60 border border-gray-800 rounded-xl px-4 py-3 text-center min-w-[90px]">
+          <div class="text-2xl font-bold text-teal-400 mono" id="stat-packets">—</div>
+          <div class="text-gray-500 text-xs mt-1">Total Packets</div>
+        </div>
+        <div class="bg-gray-900/60 border border-gray-800 rounded-xl px-4 py-3 text-center min-w-[90px]">
+          <div class="text-2xl font-bold text-violet-400 mono" id="stat-sessions">—</div>
+          <div class="text-gray-500 text-xs mt-1">Active Sessions</div>
+        </div>
+        <div class="bg-gray-900/60 border border-gray-800 rounded-xl px-4 py-3 text-center min-w-[90px]">
+          <div class="text-2xl font-bold text-emerald-400 mono" id="stat-devices">—</div>
+          <div class="text-gray-500 text-xs mt-1">Devices Online</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Session Selector ────────────────────────────────────── -->
+  <section class="px-6 max-w-7xl mx-auto mb-6">
+    <div class="bg-gray-900/40 border border-gray-800 rounded-2xl p-5">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <div class="flex-1">
+          <label class="text-gray-400 text-xs font-semibold tracking-wide mb-2 block">ACTIVE SESSION</label>
+          <select id="session-select"
+            class="w-full bg-gray-950 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:border-teal-500 focus:outline-none">
+            <option value="">— Loading sessions… —</option>
+          </select>
+        </div>
+        <div class="flex gap-2">
+          <button id="btn-refresh-sessions"
+            class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 text-sm px-4 py-2 rounded-lg transition">
+            ↻ Refresh
+          </button>
+          <button id="btn-demo-ingest"
+            class="bg-teal-900/60 hover:bg-teal-800/60 border border-teal-700/50 text-teal-300 text-sm px-4 py-2 rounded-lg transition">
+            ⚡ Inject Demo Packet
+          </button>
+        </div>
+      </div>
+
+      <!-- Session info strip -->
+      <div id="session-info" class="mt-4 hidden">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div><span class="text-gray-500">Device</span><div class="text-gray-200 mono mt-1" id="si-device">—</div></div>
+          <div><span class="text-gray-500">Status</span><div class="mt-1" id="si-status">—</div></div>
+          <div><span class="text-gray-500">Started</span><div class="text-gray-200 mono mt-1" id="si-started">—</div></div>
+          <div><span class="text-gray-500">Packets</span><div class="text-gray-200 mono mt-1" id="si-packets">—</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Main Grid ───────────────────────────────────────────── -->
+  <section class="px-6 max-w-7xl mx-auto">
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+      <!-- Left col: Three.js orb + 6 scores -->
+      <div class="xl:col-span-1 space-y-6">
+
+        <!-- DIS Orb -->
+        <div class="score-card p-6 text-center">
+          <div class="text-gray-400 text-xs font-semibold tracking-widest mb-4">DIGESTIVE INTELLIGENCE SCORE</div>
+          <div class="relative inline-block orb-glow rounded-full mb-4">
+            <canvas id="three-canvas" width="220" height="220"></canvas>
+          </div>
+          <div class="text-5xl font-bold text-white mb-1" id="dis-score">—</div>
+          <div class="text-gray-500 text-sm" id="dis-trend">Awaiting data…</div>
+          <div class="mt-3 flex justify-center gap-2">
+            <span class="text-xs px-2 py-1 rounded-full bg-teal-950 text-teal-400 border border-teal-900/50" id="dis-conf">—% confidence</span>
+          </div>
+        </div>
+
+        <!-- 6 Score Rings -->
+        <div class="score-card p-5">
+          <div class="text-gray-400 text-xs font-semibold tracking-widest mb-4">COMPONENT SCORES</div>
+          <div class="grid grid-cols-2 gap-4">
+            ${[
+              { id: 'te', label: 'Transit', color: '#2dd4bf' },
+              { id: 'ds', label: 'Stability', color: '#a78bfa' },
+              { id: 'dr', label: 'Rhythm', color: '#38bdf8' },
+              { id: 'fr', label: 'Food Resp', color: '#34d399' },
+              { id: 'rs', label: 'Recovery', color: '#fbbf24' },
+              { id: 'ev', label: 'Variability', color: '#fb7185' },
+            ].map(s => `
+              <div class="text-center">
+                <svg width="72" height="72" viewBox="0 0 72 72">
+                  <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="5"/>
+                  <circle id="ring-${s.id}" cx="36" cy="36" r="30" fill="none"
+                    stroke="${s.color}" stroke-width="5" stroke-linecap="round"
+                    stroke-dasharray="188.5" stroke-dashoffset="188.5"
+                    transform="rotate(-90 36 36)" class="score-ring"/>
+                </svg>
+                <div class="text-sm font-bold text-white -mt-1" id="val-${s.id}">—</div>
+                <div class="text-gray-500 text-xs">${s.label}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Anomaly indicator -->
+        <div id="anomaly-box" class="score-card p-5 hidden border-rose-900/40">
+          <div class="flex items-start gap-3">
+            <span class="text-rose-400 text-xl">⚠</span>
+            <div>
+              <div class="text-rose-400 font-semibold text-sm">Anomaly Detected</div>
+              <div class="text-gray-300 text-xs mt-1" id="anomaly-desc">—</div>
+              <div class="text-gray-500 text-xs mt-1 mono" id="anomaly-ts">—</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Middle col: Live chart + pH/Temp strip -->
+      <div class="xl:col-span-1 space-y-6">
+
+        <!-- Rolling sensor chart -->
+        <div class="score-card p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div class="text-gray-400 text-xs font-semibold tracking-widest">LIVE SENSOR STREAM</div>
+            <div class="flex gap-3 text-xs">
+              <span class="flex items-center gap-1"><span class="w-3 h-1 bg-teal-400 rounded inline-block"></span>pH</span>
+              <span class="flex items-center gap-1"><span class="w-3 h-1 bg-rose-400 rounded inline-block"></span>Temp</span>
+              <span class="flex items-center gap-1"><span class="w-3 h-1 bg-violet-400 rounded inline-block"></span>Motion</span>
+            </div>
+          </div>
+          <canvas id="sensor-chart" width="400" height="180"></canvas>
+        </div>
+
+        <!-- Current readings -->
+        <div class="score-card p-5">
+          <div class="text-gray-400 text-xs font-semibold tracking-widest mb-4">CURRENT READINGS</div>
+          <div class="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <div class="text-2xl font-bold mono" id="cur-ph" style="color:#2dd4bf">—</div>
+              <div class="text-gray-500 text-xs mt-1">pH</div>
+              <div class="text-gray-600 text-xs mt-1" id="cur-ph-zone">—</div>
+            </div>
+            <div>
+              <div class="text-2xl font-bold mono" id="cur-temp" style="color:#fb7185">—°C</div>
+              <div class="text-gray-500 text-xs mt-1">Temperature</div>
+            </div>
+            <div>
+              <div class="text-2xl font-bold mono" id="cur-motion" style="color:#a78bfa">—g</div>
+              <div class="text-gray-500 text-xs mt-1">Motion</div>
+            </div>
+          </div>
+
+          <div class="mt-4 pt-4 border-t border-gray-800 grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <span class="text-gray-500">Battery</span>
+              <div class="mt-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+                <div id="battery-bar" class="h-2 bg-emerald-400 rounded-full transition-all" style="width:100%"></div>
+              </div>
+              <div class="text-gray-300 mono mt-1" id="battery-pct">—%</div>
+            </div>
+            <div>
+              <span class="text-gray-500">Signal</span>
+              <div class="mt-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+                <div id="signal-bar" class="h-2 bg-sky-400 rounded-full transition-all" style="width:100%"></div>
+              </div>
+              <div class="text-gray-300 mono mt-1" id="signal-dbm">— dBm</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- GI Zone tracker -->
+        <div class="score-card p-5">
+          <div class="text-gray-400 text-xs font-semibold tracking-widest mb-3">GI ZONE TRACKER</div>
+          <div id="gi-zone-track" class="space-y-2">
+            ${['Stomach', 'Duodenum', 'Jejunum', 'Ileum', 'Colon'].map((z, i) => `
+              <div class="flex items-center gap-3">
+                <div class="w-20 text-gray-500 text-xs">${z}</div>
+                <div class="flex-1 bg-gray-800/60 rounded-full h-5 overflow-hidden">
+                  <div id="zone-bar-${i}" class="h-5 rounded-full transition-all duration-700"
+                    style="width:0%; background: linear-gradient(90deg, #2dd4bf22, #2dd4bf66)">
+                  </div>
+                </div>
+                <div id="zone-pct-${i}" class="text-gray-500 text-xs mono w-8 text-right">0%</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <!-- Right col: Packet feed + score history chart -->
+      <div class="xl:col-span-1 space-y-6">
+
+        <!-- Score history sparklines -->
+        <div class="score-card p-5">
+          <div class="text-gray-400 text-xs font-semibold tracking-widest mb-4">DIS SCORE HISTORY</div>
+          <canvas id="dis-history-chart" width="400" height="120"></canvas>
+          <div class="mt-3 grid grid-cols-3 gap-2 text-xs text-center">
+            <div>
+              <div class="text-teal-400 font-semibold mono" id="dis-avg">—</div>
+              <div class="text-gray-500">Session Avg</div>
+            </div>
+            <div>
+              <div class="text-emerald-400 font-semibold mono" id="dis-max">—</div>
+              <div class="text-gray-500">Peak</div>
+            </div>
+            <div>
+              <div class="text-rose-400 font-semibold mono" id="dis-min">—</div>
+              <div class="text-gray-500">Trough</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live packet feed -->
+        <div class="score-card p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-gray-400 text-xs font-semibold tracking-widest">PACKET FEED</div>
+            <div class="text-gray-600 text-xs mono" id="feed-rate">— pkt/min</div>
+          </div>
+          <div id="packet-feed" class="space-y-1.5 max-h-[280px] overflow-y-auto scrollbar-hide">
+            <div class="text-gray-600 text-xs text-center py-8">Awaiting packets…</div>
+          </div>
+        </div>
+
+        <!-- Rolling averages -->
+        <div class="score-card p-5">
+          <div class="text-gray-400 text-xs font-semibold tracking-widest mb-3">ROLLING AVERAGES (30-pkt window)</div>
+          <div class="space-y-3">
+            ${[
+              { id: 'ra-ph', label: 'pH Avg', unit: '', color: '#2dd4bf' },
+              { id: 'ra-temp', label: 'Temp Avg', unit: '°C', color: '#fb7185' },
+              { id: 'ra-motion', label: 'Motion Avg', unit: 'g', color: '#a78bfa' },
+            ].map(m => `
+              <div class="flex items-center justify-between">
+                <span class="text-gray-400 text-xs">${m.label}</span>
+                <span class="mono text-sm font-medium" id="${m.id}" style="color:${m.color}">—${m.unit}</span>
+              </div>
+            `).join('')}
+            <div class="pt-2 border-t border-gray-800 space-y-2">
+              ${[
+                { id: 'rv-ph', label: 'pH Variance', color: '#2dd4bf' },
+                { id: 'rv-temp', label: 'Temp Variance', color: '#fb7185' },
+              ].map(m => `
+                <div class="flex items-center justify-between">
+                  <span class="text-gray-500 text-xs">${m.label}</span>
+                  <span class="mono text-xs" id="${m.id}" style="color:${m.color}60">±—</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── No Session Overlay ───────────────────────────────────── -->
+  <div id="no-session-overlay" class="fixed inset-0 bg-gray-950/80 backdrop-blur-sm z-40 flex items-center justify-center" style="top:72px">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 max-w-md text-center mx-4">
+      <div class="text-4xl mb-4">⚡</div>
+      <h3 class="text-white font-bold text-xl mb-2">No Active Session</h3>
+      <p class="text-gray-400 text-sm mb-6">Start a Python simulator or register a device and begin a session to see live data stream here.</p>
+      <div class="bg-gray-950 rounded-xl p-4 text-left mb-6">
+        <div class="text-gray-500 text-xs mb-2 font-semibold">QUICK START — DEMO SESSION</div>
+        <code class="text-teal-400 text-xs mono block">curl -X POST /api/session/start \\<br>  -H "Content-Type: application/json" \\<br>  -d '{"device_id":"demo_001"}'</code>
+      </div>
+      <button id="btn-create-demo-session"
+        class="w-full bg-teal-600 hover:bg-teal-500 text-white font-semibold py-3 rounded-xl transition text-sm">
+        ⚡ Create Demo Session Now
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Scripts ─────────────────────────────────────────────── -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <script>
+  // ══════════════════════════════════════════════════════════════
+  // DigestIQ Live Dashboard — Smart Polling Engine
+  // Polls /api/session/:id/latest every 2s
+  // Updates: Three.js orb, sensor chart, score rings, packet feed
+  // ══════════════════════════════════════════════════════════════
+
+  const POLL_INTERVAL = 2000  // 2s smart polling
+  const WINDOW_SIZE   = 60    // show last 60 data points on chart
+  const SCORE_HISTORY = 80    // DIS history to track
+
+  // ── State ────────────────────────────────────────────────────
+  let state = {
+    sessionId: null,
+    lastTs: null,
+    pollCount: 0,
+    pollTimer: null,
+    packets: [],        // rolling sensor buffer
+    disHistory: [],     // DIS score history
+    packetFeed: [],     // display feed
+    feedStartTime: null,
+    feedPacketCount: 0,
+    scores: null,
+    connected: false,
+  }
+
+  // ── Three.js Orb ─────────────────────────────────────────────
+  let orbScene, orbCamera, orbRenderer, orbSphere, orbRing1, orbRing2, orbParticles
+  let orbAnimId
+
+  function initOrb() {
+    const canvas = document.getElementById('three-canvas')
+    orbScene = new THREE.Scene()
+    orbCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 100)
+    orbCamera.position.z = 3.5
+
+    orbRenderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true })
+    orbRenderer.setSize(220, 220)
+    orbRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    orbRenderer.setClearColor(0x000000, 0)
+
+    // Core sphere
+    const geo = new THREE.SphereGeometry(1, 64, 64)
+    const mat = new THREE.MeshPhongMaterial({
+      color: 0x0d9488, emissive: 0x0d2d2a, shininess: 100,
+      transparent: true, opacity: 0.85, wireframe: false
+    })
+    orbSphere = new THREE.Mesh(geo, mat)
+    orbScene.add(orbSphere)
+
+    // Wireframe overlay
+    const wireMat = new THREE.MeshBasicMaterial({
+      color: 0x2dd4bf, wireframe: true, transparent: true, opacity: 0.08
+    })
+    const wireSphere = new THREE.Mesh(new THREE.SphereGeometry(1.02, 24, 24), wireMat)
+    orbScene.add(wireSphere)
+
+    // Orbital rings
+    const ringGeo1 = new THREE.TorusGeometry(1.5, 0.015, 16, 100)
+    orbRing1 = new THREE.Mesh(ringGeo1,
+      new THREE.MeshBasicMaterial({ color: 0x2dd4bf, transparent: true, opacity: 0.5 }))
+    orbRing1.rotation.x = Math.PI / 3
+    orbScene.add(orbRing1)
+
+    const ringGeo2 = new THREE.TorusGeometry(1.7, 0.010, 16, 100)
+    orbRing2 = new THREE.Mesh(ringGeo2,
+      new THREE.MeshBasicMaterial({ color: 0xa78bfa, transparent: true, opacity: 0.3 }))
+    orbRing2.rotation.x = -Math.PI / 4
+    orbRing2.rotation.z = Math.PI / 6
+    orbScene.add(orbRing2)
+
+    // Particle field
+    const pGeo = new THREE.BufferGeometry()
+    const pCount = 200
+    const positions = new Float32Array(pCount * 3)
+    for (let i = 0; i < pCount; i++) {
+      const r = 1.8 + Math.random() * 0.5
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      positions[i*3]   = r * Math.sin(phi) * Math.cos(theta)
+      positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta)
+      positions[i*3+2] = r * Math.cos(phi)
+    }
+    pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    orbParticles = new THREE.Points(pGeo,
+      new THREE.PointsMaterial({ color: 0x2dd4bf, size: 0.015, transparent: true, opacity: 0.6 }))
+    orbScene.add(orbParticles)
+
+    // Lighting
+    orbScene.add(new THREE.AmbientLight(0xffffff, 0.4))
+    const dl = new THREE.DirectionalLight(0x2dd4bf, 1.2)
+    dl.position.set(5, 5, 5)
+    orbScene.add(dl)
+    const dl2 = new THREE.DirectionalLight(0xa78bfa, 0.6)
+    dl2.position.set(-3, -3, 3)
+    orbScene.add(dl2)
+
+    animateOrb()
+  }
+
+  function animateOrb() {
+    orbAnimId = requestAnimationFrame(animateOrb)
+    const t = Date.now() * 0.001
+    if (orbSphere)     { orbSphere.rotation.y = t * 0.3; orbSphere.rotation.x = Math.sin(t * 0.2) * 0.1 }
+    if (orbRing1)      { orbRing1.rotation.z = t * 0.5 }
+    if (orbRing2)      { orbRing2.rotation.y = t * 0.3; orbRing2.rotation.x += 0.002 }
+    if (orbParticles)  { orbParticles.rotation.y = t * 0.1 }
+    orbRenderer.render(orbScene, orbCamera)
+  }
+
+  function updateOrbColor(dis) {
+    if (!orbSphere) return
+    // Map DIS (0–100) → teal → amber → rose
+    let color
+    if (dis >= 70)      color = new THREE.Color(0x0d9488)
+    else if (dis >= 50) color = new THREE.Color(0x92400e)
+    else                color = new THREE.Color(0x9f1239)
+
+    orbSphere.material.color.lerp(color, 0.1)
+    orbSphere.material.emissive.set(color.clone().multiplyScalar(0.15))
+  }
+
+  // ── Sensor Chart ─────────────────────────────────────────────
+  let sensorChart, disHistChart
+  const sensorData = {
+    labels: Array(WINDOW_SIZE).fill(''),
+    ph: Array(WINDOW_SIZE).fill(null),
+    temp: Array(WINDOW_SIZE).fill(null),
+    motion: Array(WINDOW_SIZE).fill(null),
+  }
+
+  function initCharts() {
+    // Sensor chart
+    const ctx = document.getElementById('sensor-chart').getContext('2d')
+    sensorChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: sensorData.labels,
+        datasets: [
+          { label: 'pH', data: sensorData.ph, borderColor: '#2dd4bf', borderWidth: 1.5,
+            pointRadius: 0, tension: 0.4, yAxisID: 'y1' },
+          { label: 'Temp (norm)', data: sensorData.temp, borderColor: '#fb7185', borderWidth: 1.5,
+            pointRadius: 0, tension: 0.4, yAxisID: 'y2' },
+          { label: 'Motion', data: sensorData.motion, borderColor: '#a78bfa', borderWidth: 1,
+            pointRadius: 0, tension: 0.3, yAxisID: 'y3' },
+        ]
+      },
+      options: {
+        animation: false, responsive: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y1: { position: 'left',  min: 1, max: 9,   ticks: { color: '#2dd4bf', font:{size:9} }, grid: { color: 'rgba(255,255,255,.04)' } },
+          y2: { position: 'right', min: 35, max: 40, ticks: { color: '#fb7185', font:{size:9} }, grid: { display: false } },
+          y3: { display: false, min: 0, max: 5 },
+        }
+      }
+    })
+
+    // DIS history chart
+    const ctx2 = document.getElementById('dis-history-chart').getContext('2d')
+    disHistChart = new Chart(ctx2, {
+      type: 'line',
+      data: {
+        labels: Array(SCORE_HISTORY).fill(''),
+        datasets: [{
+          label: 'DIS', data: Array(SCORE_HISTORY).fill(null),
+          borderColor: '#2dd4bf', borderWidth: 2, pointRadius: 0, tension: 0.4,
+          fill: true,
+          backgroundColor: (ctx) => {
+            const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, 120)
+            g.addColorStop(0, 'rgba(45,212,191,.2)')
+            g.addColorStop(1, 'rgba(45,212,191,.0)')
+            return g
+          }
+        }]
+      },
+      options: {
+        animation: false, responsive: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: { min: 0, max: 100,
+               ticks: { color: '#4b5563', font:{size:9}, stepSize:25 },
+               grid: { color: 'rgba(255,255,255,.04)' } }
+        }
+      }
+    })
+  }
+
+  // ── Push data into rolling charts ─────────────────────────────
+  function pushSensorData(pkt) {
+    sensorData.ph.push(pkt.ph !== undefined ? pkt.ph : null)
+    sensorData.temp.push(pkt.temperature !== undefined ? pkt.temperature : null)
+    sensorData.motion.push(pkt.motion_magnitude !== undefined ? pkt.motion_magnitude : null)
+    sensorData.labels.push('')
+    if (sensorData.ph.length > WINDOW_SIZE) {
+      sensorData.ph.shift(); sensorData.temp.shift()
+      sensorData.motion.shift(); sensorData.labels.shift()
+    }
+    sensorChart.update('none')
+  }
+
+  function pushDISHistory(dis) {
+    const d = disHistChart.data.datasets[0].data
+    d.push(dis)
+    if (d.length > SCORE_HISTORY) d.shift()
+    disHistChart.update('none')
+
+    // Update stats
+    const valid = d.filter(v => v !== null)
+    if (valid.length > 0) {
+      const avg = valid.reduce((s,v) => s+v, 0) / valid.length
+      document.getElementById('dis-avg').textContent = avg.toFixed(1)
+      document.getElementById('dis-max').textContent = Math.max(...valid).toFixed(1)
+      document.getElementById('dis-min').textContent = Math.min(...valid).toFixed(1)
+    }
+  }
+
+  // ── Score ring updater ────────────────────────────────────────
+  const RING_CIRCUMFERENCE = 188.5
+
+  function updateRing(id, value) {
+    const ring = document.getElementById('ring-' + id)
+    const val  = document.getElementById('val-' + id)
+    if (!ring || value === undefined) return
+    const offset = RING_CIRCUMFERENCE * (1 - (value / 100))
+    ring.style.strokeDashoffset = offset
+    if (val) val.textContent = Math.round(value)
+  }
+
+  // ── GI Zone classifier ────────────────────────────────────────
+  function classifyZone(ph) {
+    if (ph < 3.0) return 0      // Stomach
+    if (ph < 5.5) return 1      // Duodenum
+    if (ph < 6.5) return 2      // Jejunum
+    if (ph < 7.5) return 3      // Ileum
+    return 4                    // Colon
+  }
+
+  function updateGIZones(packets) {
+    if (!packets || packets.length === 0) return
+    const counts = [0,0,0,0,0]
+    packets.forEach(p => { if (p.ph !== null) counts[classifyZone(p.ph)]++ })
+    const total = packets.length
+    counts.forEach((cnt, i) => {
+      const pct = Math.round((cnt / total) * 100)
+      const bar = document.getElementById('zone-bar-' + i)
+      const label = document.getElementById('zone-pct-' + i)
+      if (bar) bar.style.width = pct + '%'
+      if (label) label.textContent = pct + '%'
+    })
+  }
+
+  // ── Packet feed renderer ──────────────────────────────────────
+  function renderPacketFeed(pkt) {
+    const feed = document.getElementById('packet-feed')
+    const div = document.createElement('div')
+    div.className = 'packet-row flex items-center gap-2 text-xs py-1 px-2 rounded-lg hover:bg-gray-800/40 transition'
+    const phColor = pkt.ph < 5 ? '#fb7185' : pkt.ph > 7.5 ? '#2dd4bf' : '#34d399'
+    div.innerHTML = \`
+      <span class="text-gray-600 mono w-14 shrink-0">\${pkt.ts ? pkt.ts.substring(11,19) : '—'}</span>
+      <span class="font-medium mono" style="color:\${phColor}">pH \${pkt.ph !== null ? pkt.ph.toFixed(2) : '—'}</span>
+      <span class="text-rose-400 mono">\${pkt.temperature !== null ? pkt.temperature.toFixed(1) + '°' : '—'}</span>
+      <span class="text-violet-400 mono shrink-0">\${pkt.motion_magnitude !== null ? pkt.motion_magnitude.toFixed(3) + 'g' : '—'}</span>
+    \`
+    feed.insertBefore(div, feed.firstChild)
+    // Keep max 50 rows
+    while (feed.children.length > 50) feed.removeChild(feed.lastChild)
+  }
+
+  // ── Connection state ──────────────────────────────────────────
+  function setConnected(ok) {
+    const dot   = document.getElementById('conn-dot')
+    const label = document.getElementById('conn-label')
+    state.connected = ok
+    if (ok) {
+      dot.className = 'status-dot status-active'
+      label.textContent = 'LIVE'
+      label.className = 'text-teal-400 text-xs font-semibold tracking-wide'
+    } else {
+      dot.className = 'status-dot status-idle'
+      label.textContent = 'POLLING…'
+      label.className = 'text-amber-400 text-xs font-semibold tracking-wide'
+    }
+  }
+
+  // ── Apply full poll response to UI ────────────────────────────
+  function applyPollData(data) {
+    const { packets, latest_scores, session_status, total_packets } = data
+
+    setConnected(true)
+
+    // Update DIS score
+    if (latest_scores) {
+      const dis = latest_scores.digestive_intelligence
+      document.getElementById('dis-score').textContent = dis !== null ? Math.round(dis) : '—'
+      document.getElementById('dis-trend').textContent =
+        (latest_scores.trend || 'stable').charAt(0).toUpperCase() +
+        (latest_scores.trend || 'stable').slice(1) + ' trend'
+      document.getElementById('dis-conf').textContent =
+        (latest_scores.data_confidence || 0).toFixed(0) + '% confidence'
+
+      updateOrbColor(dis)
+      updateRing('te', latest_scores.transit_efficiency)
+      updateRing('ds', latest_scores.digestive_stability)
+      updateRing('dr', latest_scores.digestive_rhythm)
+      updateRing('fr', latest_scores.food_response)
+      updateRing('rs', latest_scores.recovery_score)
+      updateRing('ev', latest_scores.environmental_variability)
+
+      // Rolling averages
+      document.getElementById('ra-ph').textContent    = (latest_scores.ph_rolling_avg || 0).toFixed(3)
+      document.getElementById('ra-temp').textContent  = (latest_scores.temp_rolling_avg || 0).toFixed(2) + '°C'
+      document.getElementById('ra-motion').textContent= (latest_scores.motion_rolling_avg || 0).toFixed(4) + 'g'
+      document.getElementById('rv-ph').textContent    = '±' + (latest_scores.ph_variance || 0).toFixed(4)
+      document.getElementById('rv-temp').textContent  = '±' + (latest_scores.temp_variance || 0).toFixed(4)
+
+      // Anomaly display
+      const anomBox = document.getElementById('anomaly-box')
+      if (latest_scores.anomaly_detected) {
+        anomBox.classList.remove('hidden')
+        document.getElementById('anomaly-ts').textContent = latest_scores.scored_at || ''
+      } else {
+        anomBox.classList.add('hidden')
+      }
+
+      if (dis !== null) pushDISHistory(dis)
+    }
+
+    // New packets
+    if (packets && packets.length > 0) {
+      // Update session info
+      document.getElementById('si-packets').textContent = total_packets || '—'
+
+      // Update charts with new packets
+      for (const pkt of packets) {
+        pushSensorData(pkt)
+        renderPacketFeed(pkt)
+        state.feedPacketCount++
+      }
+
+      // Track last ts for incremental polling
+      const last = packets[packets.length - 1]
+      if (last?.ts) state.lastTs = last.ts
+
+      // Current readings (last packet)
+      const cur = packets[packets.length - 1]
+      if (cur) {
+        const phEl = document.getElementById('cur-ph')
+        const tempEl = document.getElementById('cur-temp')
+        const motEl = document.getElementById('cur-motion')
+        if (phEl && cur.ph !== null)             phEl.textContent = cur.ph.toFixed(2)
+        if (tempEl && cur.temperature !== null)  tempEl.textContent = cur.temperature.toFixed(1) + '°C'
+        if (motEl && cur.motion_magnitude !== null) motEl.textContent = cur.motion_magnitude.toFixed(3) + 'g'
+
+        // GI zone label
+        const zones = ['Stomach','Duodenum','Jejunum','Ileum','Colon']
+        const zi = classifyZone(cur.ph || 7)
+        document.getElementById('cur-ph-zone').textContent = zones[zi] || '—'
+
+        // Battery / signal
+        if (cur.battery !== null && cur.battery !== undefined) {
+          const bpct = Math.max(0, Math.min(100, cur.battery))
+          document.getElementById('battery-bar').style.width = bpct + '%'
+          document.getElementById('battery-pct').textContent = bpct.toFixed(0) + '%'
+          document.getElementById('battery-bar').className =
+            'h-2 rounded-full transition-all ' + (bpct > 50 ? 'bg-emerald-400' : bpct > 20 ? 'bg-amber-400' : 'bg-rose-400')
+        }
+        if (cur.signal_strength !== null && cur.signal_strength !== undefined) {
+          const sig = cur.signal_strength
+          const sigPct = Math.max(0, Math.min(100, ((sig + 120) / 120) * 100))
+          document.getElementById('signal-bar').style.width = sigPct + '%'
+          document.getElementById('signal-dbm').textContent = sig.toFixed(0) + ' dBm'
+        }
+      }
+
+      // GI zone distribution
+      updateGIZones([...state.packets, ...packets].slice(-60))
+      state.packets = [...state.packets, ...packets].slice(-200)
+    }
+
+    // Feed rate
+    if (state.feedStartTime) {
+      const elapsedMin = (Date.now() - state.feedStartTime) / 60000
+      if (elapsedMin > 0) {
+        const rate = (state.feedPacketCount / elapsedMin).toFixed(1)
+        document.getElementById('feed-rate').textContent = rate + ' pkt/min'
+      }
+    }
+  }
+
+  // ── Poll tick ─────────────────────────────────────────────────
+  async function pollTick() {
+    if (!state.sessionId) return
+
+    state.pollCount++
+    document.getElementById('poll-counter').textContent = state.pollCount + ' polls'
+
+    try {
+      const since = state.lastTs ? '&since=' + encodeURIComponent(state.lastTs) : ''
+      const url = '/api/session/' + state.sessionId + '/latest?n=50' + since
+      const res = await fetch(url)
+
+      if (!res.ok) {
+        setConnected(false)
+        return
+      }
+
+      const data = await res.json()
+      applyPollData(data)
+
+    } catch (e) {
+      setConnected(false)
+      console.error('Poll error:', e)
+    }
+  }
+
+  // ── Pipeline status ───────────────────────────────────────────
+  async function loadPipelineStatus() {
+    try {
+      const res = await fetch('/api/pipeline/status')
+      if (!res.ok) return
+      const data = await res.json()
+      document.getElementById('stat-packets').textContent = data.total_packets || '0'
+      document.getElementById('stat-sessions').textContent = data.active_sessions || '0'
+      document.getElementById('stat-devices').textContent = data.active_devices || '0'
+    } catch {}
+  }
+
+  // ── Load sessions into dropdown ───────────────────────────────
+  async function loadSessions() {
+    try {
+      const res = await fetch('/api/sessions?limit=20')
+      const data = await res.json()
+      const sel = document.getElementById('session-select')
+      sel.innerHTML = '<option value="">— Select session —</option>'
+      if (!data.sessions || data.sessions.length === 0) {
+        sel.innerHTML += '<option value="" disabled>No sessions yet — create one below</option>'
+        return
+      }
+      for (const s of data.sessions) {
+        const date = s.started_at ? s.started_at.substring(0,16).replace('T',' ') : '—'
+        const status = s.status === 'active' ? '🟢' : '⚫'
+        const opt = document.createElement('option')
+        opt.value = s.id
+        opt.textContent = \`\${status} \${s.id.substring(0,20)}… — \${date} — \${s.packet_count} pkts\`
+        sel.appendChild(opt)
+      }
+      // Auto-select the most recent active session
+      const active = data.sessions.find(s => s.status === 'active')
+      if (active) {
+        sel.value = active.id
+        selectSession(active.id, active)
+      }
+    } catch (e) { console.error('Sessions load error:', e) }
+  }
+
+  async function selectSession(sessionId, sessionData) {
+    if (!sessionId) return
+    state.sessionId = sessionId
+    state.lastTs = null
+    state.packets = []
+    state.feedPacketCount = 0
+    state.feedStartTime = Date.now()
+    document.getElementById('packet-feed').innerHTML = ''
+    document.getElementById('no-session-overlay').style.display = 'none'
+
+    // Load session info
+    let session = sessionData
+    if (!session) {
+      try {
+        const res = await fetch('/api/session/' + sessionId)
+        const d = await res.json()
+        session = d.session
+      } catch {}
+    }
+
+    if (session) {
+      document.getElementById('session-info').classList.remove('hidden')
+      document.getElementById('si-device').textContent = session.device_id || '—'
+      document.getElementById('si-packets').textContent = session.packet_count || '0'
+      document.getElementById('si-started').textContent = session.started_at
+        ? session.started_at.substring(0,16).replace('T',' ') : '—'
+
+      const statusEl = document.getElementById('si-status')
+      statusEl.innerHTML = session.status === 'active'
+        ? '<span class="text-emerald-400 font-semibold">● Active</span>'
+        : '<span class="text-gray-500">○ ' + (session.status || 'unknown') + '</span>'
+    }
+
+    // Immediate first poll
+    await pollTick()
+
+    // Start polling
+    if (state.pollTimer) clearInterval(state.pollTimer)
+    state.pollTimer = setInterval(pollTick, POLL_INTERVAL)
+  }
+
+  // ── Demo packet injection ─────────────────────────────────────
+  async function injectDemoPacket() {
+    if (!state.sessionId) { alert('Select a session first'); return }
+    const now = new Date().toISOString()
+    const t = Date.now() / 1000
+    // Simulate a GI journey: pH rises over time from 2 to 7.8
+    const elapsed = state.packets.length * 2  // seconds
+    const zoneFraction = Math.min(1, elapsed / 3600)  // 0→1 over 1h
+    const basePH = 2.0 + zoneFraction * 5.8 + (Math.random() - 0.5) * 0.4
+    const packet = {
+      device_id: 'demo_001',
+      session_id: state.sessionId,
+      ts: now,
+      temperature: 37.0 + (Math.random() - 0.5) * 0.4,
+      ph: Math.max(1.5, Math.min(8.8, basePH)),
+      motion_x: (Math.random() - 0.5) * 2,
+      motion_y: (Math.random() - 0.5) * 2,
+      motion_z: (Math.random() - 0.5) * 1,
+      battery: Math.max(10, 100 - elapsed / 100),
+      signal_strength: -70 + (Math.random() - 0.5) * 20,
+    }
+    try {
+      const res = await fetch('/api/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(packet)
+      })
+      const d = await res.json()
+      if (!d.success) console.error('Ingest error:', d)
+    } catch (e) { console.error('Inject error:', e) }
+  }
+
+  // ── Create demo session ───────────────────────────────────────
+  async function createDemoSession() {
+    try {
+      const res = await fetch('/api/session/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_id: 'demo_001', notes: 'Demo session from live dashboard' })
+      })
+      const data = await res.json()
+      if (data.session_id) {
+        await loadSessions()
+        document.getElementById('session-select').value = data.session_id
+        await selectSession(data.session_id, null)
+        // Start auto-injecting demo packets every 2s
+        startDemoAutoInject()
+      }
+    } catch (e) { console.error('Create session error:', e) }
+  }
+
+  // Auto-inject demo packets to simulate live capsule
+  let autoInjectTimer = null
+  function startDemoAutoInject() {
+    if (autoInjectTimer) clearInterval(autoInjectTimer)
+    autoInjectTimer = setInterval(injectDemoPacket, 2100)
+    // Inject first immediately
+    setTimeout(injectDemoPacket, 300)
+  }
+
+  // ── Init ──────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', async () => {
+    initOrb()
+    initCharts()
+    await loadPipelineStatus()
+    await loadSessions()
+
+    // If no session, show overlay
+    if (!state.sessionId) {
+      document.getElementById('no-session-overlay').style.display = 'flex'
+    }
+
+    // Refresh pipeline status every 10s
+    setInterval(loadPipelineStatus, 10000)
+
+    // ── Event listeners ─────────────────────────────────────────
+    document.getElementById('session-select').addEventListener('change', (e) => {
+      const v = e.target.value
+      if (v) selectSession(v, null)
+      else {
+        document.getElementById('no-session-overlay').style.display = 'flex'
+        if (state.pollTimer) clearInterval(state.pollTimer)
+        state.sessionId = null
+      }
+    })
+
+    document.getElementById('btn-refresh-sessions').addEventListener('click', loadSessions)
+    document.getElementById('btn-demo-ingest').addEventListener('click', injectDemoPacket)
+    document.getElementById('btn-create-demo-session').addEventListener('click', createDemoSession)
+  })
+  </script>
+  `
+  return layout('Live Dashboard', body, 'live')
 }
